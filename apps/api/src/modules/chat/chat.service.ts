@@ -104,7 +104,7 @@ export class ChatService {
   async searchMessages(chatId: string, requestUser: RequestUser, query: SearchMessagesQueryDto): Promise<Message[]> {
     const member = await this.db.ensureMember(chatId, requestUser.userId);
     this.policy.assertMemberCanAccess(member);
-    await this.policy.assertCan(chatId, member, "chat.view");
+    await this.policy.assertCan(chatId, member, "message.search");
 
     const fromTs = this.parseDateQuery(query.from, "from");
     const toTs = this.parseDateQuery(query.to, "to");
@@ -331,7 +331,7 @@ export class ChatService {
   ): Promise<Array<{ pinnedAt: string; message: Message }>> {
     const member = await this.db.ensureMember(chatId, requestUser.userId);
     this.policy.assertMemberCanAccess(member);
-    await this.policy.assertCan(chatId, member, "chat.view");
+    await this.policy.assertCan(chatId, member, "message.pin.view");
 
     const [messages, audits] = await Promise.all([this.db.listMessages(chatId), this.db.listAudit(chatId)]);
     const messageById = new Map(messages.map((message) => [message.id, message]));

@@ -2366,7 +2366,7 @@ export class PrismaDatabaseService implements DatabaseService {
       await tx.chat.create({
         data: {
           id: MAIN_CHAT_ID,
-          name: "Phantom Lab Main Chat",
+          name: "Ristoranti Chat",
           mode: "chat_mode",
           defaultRoleId: MAIN_MEMBER_ROLE_ID
         }
@@ -2426,7 +2426,7 @@ export class PrismaDatabaseService implements DatabaseService {
         data: {
           id: MAIN_IDENTITY_ID,
           chatId: MAIN_CHAT_ID,
-          name: "Phantom Lab Team",
+          name: "Ristoranti Chat Team",
           type: "group",
           isActive: true,
           createdBy: "system"

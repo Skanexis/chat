@@ -46,7 +46,8 @@ export type ChatSocket = {
 
 export function connectChatSocket(apiBaseUrl: string, token: string, chatId: string, callbacks: WsCallbacks): ChatSocket {
   const socket = io(`${getApiOrigin(apiBaseUrl)}/ws`, {
-    transports: ["websocket"],
+    path: "/ws/socket.io",
+    transports: ["websocket", "polling"],
     auth: {
       token
     }

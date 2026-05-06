@@ -42,6 +42,7 @@ const wsMaxHttpBufferSize = (() => {
 
 @WebSocketGateway({
   namespace: "/ws",
+  path: "/ws/socket.io",
   maxHttpBufferSize: wsMaxHttpBufferSize,
   cors: {
     origin: wsCorsOrigin

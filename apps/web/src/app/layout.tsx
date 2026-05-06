@@ -16,7 +16,7 @@ const monoFont = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Phantom Lab Mini App",
+  title: "Ristoranti Chat Mini App",
   description: "Frontend kickoff for Telegram Mini App chat"
 };
 

@@ -1752,7 +1752,7 @@ export class InMemoryDatabase implements DatabaseService {
 
     this.chats.set(chatId, {
       id: chatId,
-      name: "Phantom Lab Main Chat",
+      name: "Ristoranti Chat",
       mode: "chat_mode",
       defaultRoleId: memberRoleId,
       createdAt: now
@@ -1762,7 +1762,7 @@ export class InMemoryDatabase implements DatabaseService {
     this.identities.set(identityId, {
       id: identityId,
       chatId,
-      name: "Phantom Lab Team",
+      name: "Ristoranti Chat Team",
       type: "group",
       isActive: true,
       createdBy: "system",

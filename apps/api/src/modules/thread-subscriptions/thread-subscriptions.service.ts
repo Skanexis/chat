@@ -35,7 +35,7 @@ export class ThreadSubscriptionsService implements OnModuleDestroy {
   ): Promise<ThreadSubscription> {
     const member = await this.db.ensureMember(chatId, requestUser.userId);
     this.policy.assertMemberCanAccess(member);
-    await this.policy.assertCan(chatId, member, "chat.view");
+    await this.policy.assertCan(chatId, member, "thread.subscription.manage");
 
     const message = await this.db.getMessage(chatId, dto.message_id);
     if (message.isDeleted) {
@@ -99,7 +99,7 @@ export class ThreadSubscriptionsService implements OnModuleDestroy {
   async listThreadSubscriptions(chatId: string, requestUser: RequestUser): Promise<ThreadSubscription[]> {
     const member = await this.db.ensureMember(chatId, requestUser.userId);
     this.policy.assertMemberCanAccess(member);
-    await this.policy.assertCan(chatId, member, "chat.view");
+    await this.policy.assertCan(chatId, member, "thread.subscription.manage");
     return this.db.listThreadSubscriptions(chatId, requestUser.userId);
   }
 
@@ -110,7 +110,7 @@ export class ThreadSubscriptionsService implements OnModuleDestroy {
   ): Promise<{ ok: true; subscriptionId: string }> {
     const member = await this.db.ensureMember(chatId, requestUser.userId);
     this.policy.assertMemberCanAccess(member);
-    await this.policy.assertCan(chatId, member, "chat.view");
+    await this.policy.assertCan(chatId, member, "thread.subscription.manage");
 
     const subscription = await this.db.getThreadSubscription(chatId, subscriptionId);
     if (subscription.userId !== requestUser.userId) {

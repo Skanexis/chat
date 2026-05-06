@@ -98,6 +98,10 @@ export class AuthService {
   private async assertTelegramAccessChatMembership(telegramUserId: number): Promise<void> {
     const accessChatId = this.configService.get<string>("TELEGRAM_ACCESS_CHAT_ID")?.trim();
     if (!accessChatId) {
+      const nodeEnv = (this.configService.get<string>("NODE_ENV") ?? "").trim().toLowerCase();
+      if (nodeEnv === "production") {
+        throw new ForbiddenException("Mini App access is disabled: TELEGRAM_ACCESS_CHAT_ID is not configured.");
+      }
       return;
     }
 

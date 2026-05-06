@@ -23,23 +23,35 @@ export function ChatAppShell({ children }: ChatAppShellProps) {
   const pathname = usePathname();
 
   const rootPath = `/chat/${encodeURIComponent(runtime.chatId)}`;
+  const normalizedPathname = pathname.endsWith("/") && pathname.length > 1 ? pathname.slice(0, -1) : pathname;
+  const memberRestrictedPaths = new Set([
+    `${rootPath}/search`,
+    `${rootPath}/pinned`,
+    `${rootPath}/drafts`,
+    `${rootPath}/bookmarks`,
+    `${rootPath}/reminders`,
+    `${rootPath}/read-receipts`,
+    `${rootPath}/thread-subscriptions`,
+    `${rootPath}/polls`,
+    `${rootPath}/reputation`
+  ]);
   const navItems = [
-    { label: "Chat", href: rootPath },
-    { label: "Search", href: `${rootPath}/search` },
-    { label: "Pinned", href: `${rootPath}/pinned` },
-    { label: "Drafts", href: `${rootPath}/drafts` },
-    { label: "Bookmarks", href: `${rootPath}/bookmarks` },
-    { label: "Reminders", href: `${rootPath}/reminders` },
-    { label: "Receipts", href: `${rootPath}/read-receipts` },
-    { label: "Threads", href: `${rootPath}/thread-subscriptions` },
-    { label: "Polls", href: `${rootPath}/polls` },
-    { label: "Knowledge", href: `${rootPath}/knowledge` },
-    { label: "Translate", href: `${rootPath}/translations` },
-    { label: "E2E", href: `${rootPath}/e2e-devices` },
-    { label: "Reputation", href: `${rootPath}/reputation` }
+    { label: "Chat", href: rootPath }
   ];
 
   if (runtime.isModerator) {
+    navItems.push({ label: "Search", href: `${rootPath}/search` });
+    navItems.push({ label: "Pinned", href: `${rootPath}/pinned` });
+    navItems.push({ label: "Drafts", href: `${rootPath}/drafts` });
+    navItems.push({ label: "Bookmarks", href: `${rootPath}/bookmarks` });
+    navItems.push({ label: "Reminders", href: `${rootPath}/reminders` });
+    navItems.push({ label: "Receipts", href: `${rootPath}/read-receipts` });
+    navItems.push({ label: "Threads", href: `${rootPath}/thread-subscriptions` });
+    navItems.push({ label: "Polls", href: `${rootPath}/polls` });
+    navItems.push({ label: "Knowledge", href: `${rootPath}/knowledge` });
+    navItems.push({ label: "Translate", href: `${rootPath}/translations` });
+    navItems.push({ label: "E2E", href: `${rootPath}/e2e-devices` });
+    navItems.push({ label: "Reputation", href: `${rootPath}/reputation` });
     navItems.push({ label: "Members", href: `${rootPath}/admin/members` });
     navItems.push({ label: "TempRooms", href: `${rootPath}/admin/temp-rooms` });
   }
@@ -75,11 +87,25 @@ export function ChatAppShell({ children }: ChatAppShellProps) {
     );
   }
 
+  if (!runtime.isModerator && memberRestrictedPaths.has(normalizedPathname)) {
+    return (
+      <section className="app-shell">
+        <ErrorSurface
+          code={403}
+          title="Forbidden"
+          message="This section is available only for moderator and admin roles."
+          actionLabel="Go to Chat"
+          onAction={runtime.reload}
+        />
+      </section>
+    );
+  }
+
   return (
     <section className="app-shell">
       <header className="app-topbar">
         <div>
-          <h1>{runtime.chat?.name ?? "Phantom Lab"}</h1>
+          <h1>{runtime.chat?.name ?? "Ristoranti Chat"}</h1>
           <p>
             chat_id: <code>{runtime.chatId}</code>
           </p>
@@ -113,23 +139,6 @@ export function ChatAppShell({ children }: ChatAppShellProps) {
       ) : null}
 
       <footer className="app-footer">
-        <div className="app-session-line">
-          <span>
-            user: <code>{runtime.session?.user.id ?? "-"}</code>
-          </span>
-          <span>
-            tg: <code>{runtime.session?.user.telegramId ?? "-"}</code>
-          </span>
-          <span>
-            identities: <code>{runtime.identities.length}</code>
-          </span>
-          <span>
-            mode: <code>{runtime.chat?.mode ?? "-"}</code>
-          </span>
-          <span>
-            ws_event: <code>{runtime.wsLastEventAt ? new Date(runtime.wsLastEventAt).toLocaleTimeString() : "-"}</code>
-          </span>
-        </div>
         <nav className="ds-bottom-tabs" aria-label="Chat sections">
           {navItems.map((item) => {
             const active = pathname === item.href;

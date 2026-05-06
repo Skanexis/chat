@@ -185,7 +185,7 @@ export function ChatMainSection() {
 
   return (
     <>
-      <PinnedBanner message="Welcome to Phantom Lab. Follow the rules and use role-aware sender mode when needed." />
+      <PinnedBanner message="Welcome to Ristoranti Chat. Follow the rules and use role-aware sender mode when needed." />
       <div className="chat-feed" ref={feedRef}>
         {runtime.messages.length === 0 ? (
           <StateBlock state="empty" title="No messages yet" description="Send the first message to start the thread." />
@@ -2014,9 +2014,10 @@ export function KnowledgeSection() {
   }
 
   return (
-    <StateBlock state={updating ? "updating" : "ready"}>
-      <Card className="app-tab-card">
-        <SectionTitle title="Knowledge Articles" subtitle="Connected to /knowledge/articles create and update contracts." />
+    <PermissionGate allowed={runtime.isModerator} hint="Moderator permissions are required for this section.">
+      <StateBlock state={updating ? "updating" : "ready"}>
+        <Card className="app-tab-card">
+          <SectionTitle title="Knowledge Articles" subtitle="Connected to /knowledge/articles create and update contracts." />
         <form className="panel-form" onSubmit={handleCreate}>
           <label>
             Title
@@ -2110,8 +2111,9 @@ export function KnowledgeSection() {
             </div>
           )}
         </section>
-      </Card>
-    </StateBlock>
+        </Card>
+      </StateBlock>
+    </PermissionGate>
   );
 }
 
@@ -2203,9 +2205,10 @@ export function TranslationsSection() {
   }
 
   return (
-    <StateBlock state={updating ? "updating" : "ready"}>
-      <Card className="app-tab-card">
-        <SectionTitle title="Translations" subtitle="Connected to /messages/:messageId/translate and /translations." />
+    <PermissionGate allowed={runtime.isModerator} hint="Moderator permissions are required for this section.">
+      <StateBlock state={updating ? "updating" : "ready"}>
+        <Card className="app-tab-card">
+          <SectionTitle title="Translations" subtitle="Connected to /messages/:messageId/translate and /translations." />
         <form className="panel-form" onSubmit={handleTranslate}>
           <label>
             Message ID
@@ -2311,8 +2314,9 @@ export function TranslationsSection() {
             </div>
           )}
         </section>
-      </Card>
-    </StateBlock>
+        </Card>
+      </StateBlock>
+    </PermissionGate>
   );
 }
 
@@ -2622,9 +2626,10 @@ export function E2EDevicesSection() {
   }, [loadOwnDevices]);
 
   return (
-    <StateBlock state={updating ? "updating" : "ready"}>
-      <Card className="app-tab-card">
-        <SectionTitle title="E2E Devices" subtitle="Connected to /e2e/devices register/list/deactivate endpoints." />
+    <PermissionGate allowed={runtime.isModerator} hint="Moderator permissions are required for this section.">
+      <StateBlock state={updating ? "updating" : "ready"}>
+        <Card className="app-tab-card">
+          <SectionTitle title="E2E Devices" subtitle="Connected to /e2e/devices register/list/deactivate endpoints." />
         <form className="panel-form" onSubmit={handleUpsert}>
           <label>
             Device ID
@@ -2735,8 +2740,9 @@ export function E2EDevicesSection() {
             </div>
           )}
         </section>
-      </Card>
-    </StateBlock>
+        </Card>
+      </StateBlock>
+    </PermissionGate>
   );
 }
 
@@ -4225,7 +4231,7 @@ export function BroadcastsAdminSection() {
 
   const [name, setName] = useState("New campaign");
   const [broadcastType, setBroadcastType] = useState<"scheduled" | "recurring" | "event_triggered" | "digest">("scheduled");
-  const [contentText, setContentText] = useState("Hello from Phantom Lab.");
+  const [contentText, setContentText] = useState("Hello from Ristoranti Chat.");
   const [scheduleAt, setScheduleAt] = useState(buildDraftDefaultDateTimeValue);
   const [cron, setCron] = useState("");
   const [timezone, setTimezone] = useState("UTC");

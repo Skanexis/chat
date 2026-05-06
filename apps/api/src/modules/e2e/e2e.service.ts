@@ -4,7 +4,7 @@ import { ConfigService } from "@nestjs/config";
 import { DATABASE_SERVICE } from "../../core/database.service.js";
 import type { DatabaseService } from "../../core/database.service.js";
 import { PolicyService } from "../../core/policy.service.js";
-import type { ChatMember, E2EDevice, RequestUser } from "../../core/types.js";
+import type { E2EDevice, RequestUser } from "../../core/types.js";
 import { ListE2EDevicesQueryDto, UpsertE2EDeviceDto } from "./e2e.dto.js";
 
 @Injectable()
@@ -18,7 +18,7 @@ export class E2EService {
   async upsertDevice(chatId: string, requestUser: RequestUser, dto: UpsertE2EDeviceDto): Promise<E2EDevice> {
     const member = await this.db.ensureMember(chatId, requestUser.userId);
     this.policy.assertMemberCanAccess(member);
-    await this.assertCanOrFallback(chatId, member, "e2e.device.register", "message.send.text");
+    await this.policy.assertCan(chatId, member, "e2e.device.register");
     const payload = this.normalizeAndValidateDevicePayload(dto);
 
     const saved = await this.db.upsertE2EDevice({
@@ -53,14 +53,14 @@ export class E2EService {
   async listOwnDevices(chatId: string, requestUser: RequestUser): Promise<E2EDevice[]> {
     const member = await this.db.ensureMember(chatId, requestUser.userId);
     this.policy.assertMemberCanAccess(member);
-    await this.assertCanOrFallback(chatId, member, "e2e.device.view", "chat.view");
+    await this.policy.assertCan(chatId, member, "e2e.device.view");
     return this.db.listE2EDevicesForUser(chatId, requestUser.userId);
   }
 
   async listDevices(chatId: string, requestUser: RequestUser, query: ListE2EDevicesQueryDto): Promise<E2EDevice[]> {
     const member = await this.db.ensureMember(chatId, requestUser.userId);
     this.policy.assertMemberCanAccess(member);
-    await this.assertCanOrFallback(chatId, member, "e2e.device.view", "chat.view");
+    await this.policy.assertCan(chatId, member, "e2e.device.view");
 
     const userIds = this.parseUserIds(query.user_ids);
     const devices = await this.db.listE2EDevices(chatId, userIds);
@@ -81,7 +81,7 @@ export class E2EService {
   async deactivateDevice(chatId: string, deviceId: string, requestUser: RequestUser): Promise<E2EDevice> {
     const member = await this.db.ensureMember(chatId, requestUser.userId);
     this.policy.assertMemberCanAccess(member);
-    await this.assertCanOrFallback(chatId, member, "e2e.device.register", "message.send.text");
+    await this.policy.assertCan(chatId, member, "e2e.device.register");
 
     const deactivated = await this.db.deactivateE2EDevice(chatId, requestUser.userId, deviceId);
     await this.db.addAuditLog({
@@ -199,16 +199,4 @@ export class E2EService {
     return Math.floor(value);
   }
 
-  private async assertCanOrFallback(
-    chatId: string,
-    member: ChatMember,
-    permission: string,
-    fallbackPermission: string
-  ): Promise<void> {
-    const allowed = await this.policy.hasPermission(chatId, member, permission);
-    if (allowed) {
-      return;
-    }
-    await this.policy.assertCan(chatId, member, fallbackPermission);
-  }
 }

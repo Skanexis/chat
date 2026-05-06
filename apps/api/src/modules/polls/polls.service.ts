@@ -68,7 +68,7 @@ export class PollsService {
   async vote(chatId: string, pollId: string, requestUser: RequestUser, dto: VotePollDto) {
     const member = await this.db.ensureMember(chatId, requestUser.userId);
     this.policy.assertMemberCanOperate(member);
-    await this.policy.assertCan(chatId, member, "chat.view");
+    await this.policy.assertCan(chatId, member, "message.send.poll");
 
     const poll = await this.db.getPoll(chatId, pollId);
     if (poll.status !== "open") {

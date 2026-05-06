@@ -329,6 +329,12 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
             });
           },
           onError: (message) => {
+            setWsConnected(false);
+            const normalized = message.trim().toLowerCase();
+            // Ignore transient transport errors while auto-reconnect is in progress.
+            if (normalized === "websocket error" || normalized === "xhr poll error") {
+              return;
+            }
             setError({ message: `WS error: ${message}` });
           }
         });
