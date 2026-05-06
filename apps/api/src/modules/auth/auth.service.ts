@@ -17,6 +17,14 @@ type TelegramInitUser = {
   last_name?: string;
 };
 
+type TelegramGetChatMemberResponse = {
+  ok: boolean;
+  description?: string;
+  result?: {
+    status?: string;
+  };
+};
+
 type InitDataValidationResult = {
   strictMode: boolean;
   replayToken: string | null;
@@ -59,6 +67,7 @@ export class AuthService {
     const validation = this.validateInitData(params, dto.initData);
 
     const tgUser = this.parseTelegramUser(params);
+    await this.assertTelegramAccessChatMembership(tgUser.id);
     if (validation.strictMode && validation.replayToken && validation.authDate !== null) {
       await this.assertInitDataNotReplayed(validation.replayToken, tgUser.id, validation.authDate, validation.replayTtlSeconds);
     }
@@ -84,6 +93,55 @@ export class AuthService {
       user,
       memberships: await this.db.listChatsForUser(user.id)
     };
+  }
+
+  private async assertTelegramAccessChatMembership(telegramUserId: number): Promise<void> {
+    const accessChatId = this.configService.get<string>("TELEGRAM_ACCESS_CHAT_ID")?.trim();
+    if (!accessChatId) {
+      return;
+    }
+
+    const botToken = this.configService.get<string>("TELEGRAM_BOT_TOKEN")?.trim();
+    if (!botToken) {
+      throw new UnauthorizedException("TELEGRAM_BOT_TOKEN is not configured for membership verification.");
+    }
+
+    let payload: TelegramGetChatMemberResponse | null = null;
+    try {
+      const response = await fetch(`https://api.telegram.org/bot${botToken}/getChatMember`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          chat_id: accessChatId,
+          user_id: telegramUserId
+        })
+      });
+
+      if (!response.ok) {
+        throw new ForbiddenException("Telegram membership verification request failed.");
+      }
+
+      payload = (await response.json()) as TelegramGetChatMemberResponse;
+    } catch (error) {
+      if (error instanceof UnauthorizedException || error instanceof ForbiddenException) {
+        throw error;
+      }
+      throw new ForbiddenException("Telegram membership verification is unavailable.");
+    }
+
+    if (!payload?.ok) {
+      throw new ForbiddenException(
+        payload?.description?.trim().length ? `Telegram membership verification failed: ${payload.description}` : "Telegram membership verification failed."
+      );
+    }
+
+    const status = payload.result?.status;
+    const allowedStatuses = new Set(["creator", "administrator", "member", "restricted"]);
+    if (!status || !allowedStatuses.has(status)) {
+      throw new ForbiddenException("Mini App access denied: user is not a member of the required Telegram chat.");
+    }
   }
 
   async refreshSession(dto: RefreshSessionDto): Promise<AuthSessionResponse> {

@@ -168,6 +168,7 @@ nano deploy/env/web.env
   - `DATABASE_URL` (должен совпадать с логином/паролем Postgres)
   - `JWT_SECRET` (строка 32+ символа)
   - `TELEGRAM_BOT_TOKEN` (реальный токен бота)
+  - `TELEGRAM_ACCESS_CHAT_ID` (обязательный chat id группы/канала, если вход в Mini App только для участников этой группы)
   - `API_CORS_ORIGINS` и `WS_CORS_ORIGINS` (ваш домен)
 - `deploy/env/web.env`
   - `NEXT_PUBLIC_API_BASE_URL=https://chat.example.com/v1`

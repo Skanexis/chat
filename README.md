@@ -104,6 +104,13 @@ Detailed steps: [docs/POSTGRES_QUICKSTART.md](docs/POSTGRES_QUICKSTART.md)
   - `E2E_MIN_ONE_TIME_PREKEYS` (default: `10`)
   - `E2E_MAX_ONE_TIME_PREKEYS` (default: `200`)
 
+## Mini App Access Restriction
+
+- Optional strict access control for Telegram Mini App auth:
+  - `TELEGRAM_ACCESS_CHAT_ID` (example: `-1001234567890` or `@channel_username`)
+- If set, `POST /v1/auth/telegram` allows login only when Telegram `getChatMember` confirms user membership.
+- Recommended: keep the bot as admin in that target chat for reliable membership checks.
+
 ## Message Retrieval Load Controls
 
 - `GET /v1/chats/:chatId/messages` supports:

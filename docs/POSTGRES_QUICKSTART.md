@@ -35,6 +35,7 @@ BROADCAST_QUEUE_DRIVER=bullmq
 REDIS_URL=redis://localhost:6379
 # optional: Telegram channel notification pipeline
 TELEGRAM_BOT_TOKEN=<your_bot_token>
+TELEGRAM_ACCESS_CHAT_ID=<required_chat_id_if_you_want_group_only_login>
 TELEGRAM_INITDATA_MAX_AGE_SECONDS=300
 TELEGRAM_INITDATA_FUTURE_SKEW_SECONDS=30
 TELEGRAM_INITDATA_REPLAY_CLEANUP_INTERVAL_SECONDS=60
