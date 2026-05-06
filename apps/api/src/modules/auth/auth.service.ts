@@ -1,0 +1,285 @@
+import { ForbiddenException, Inject, Injectable, UnauthorizedException } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import { JwtService } from "@nestjs/jwt";
+import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+
+import { DATABASE_SERVICE } from "../../core/database.service.js";
+import type { DatabaseService } from "../../core/database.service.js";
+import { resolveJwtTokenMaxChars, resolveJwtVerifyOptions } from "../../core/jwt-config.js";
+import type { Chat, RequestUser, User } from "../../core/types.js";
+import { AuthReplayStoreService } from "./auth-replay-store.service.js";
+import type { RefreshSessionDto, TelegramAuthDto } from "./auth.dto.js";
+
+type TelegramInitUser = {
+  id: number;
+  username?: string;
+  first_name?: string;
+  last_name?: string;
+};
+
+type InitDataValidationResult = {
+  strictMode: boolean;
+  replayToken: string | null;
+  authDate: number | null;
+  replayTtlSeconds: number;
+};
+
+type AuthSessionResponse = {
+  accessToken: string;
+  refreshToken: string;
+  user: User;
+  memberships: Chat[];
+};
+
+type RefreshTokenPayload = {
+  sub: string;
+  telegramId: number;
+  type?: string;
+  jti?: string;
+  exp?: number;
+};
+
+@Injectable()
+export class AuthService {
+  private readonly jwtVerifyOptions: ReturnType<typeof resolveJwtVerifyOptions>;
+  private readonly maxTokenChars: number;
+
+  constructor(
+    @Inject(ConfigService) private readonly configService: ConfigService,
+    @Inject(JwtService) private readonly jwtService: JwtService,
+    @Inject(AuthReplayStoreService) private readonly replayStore: AuthReplayStoreService,
+    @Inject(DATABASE_SERVICE) private readonly db: DatabaseService
+  ) {
+    this.jwtVerifyOptions = resolveJwtVerifyOptions(this.configService);
+    this.maxTokenChars = resolveJwtTokenMaxChars(this.configService);
+  }
+
+  async authWithTelegram(dto: TelegramAuthDto): Promise<AuthSessionResponse> {
+    const params = new URLSearchParams(dto.initData);
+    const validation = this.validateInitData(params, dto.initData);
+
+    const tgUser = this.parseTelegramUser(params);
+    if (validation.strictMode && validation.replayToken && validation.authDate !== null) {
+      await this.assertInitDataNotReplayed(validation.replayToken, tgUser.id, validation.authDate, validation.replayTtlSeconds);
+    }
+
+    const user = await this.db.upsertTelegramUser({
+      telegramId: tgUser.id,
+      username: tgUser.username,
+      firstName: tgUser.first_name,
+      lastName: tgUser.last_name
+    });
+
+    const targetChatId = dto.chatId ?? "main";
+    await this.db.ensureMember(targetChatId, user.id);
+
+    const requestUser: RequestUser = {
+      userId: user.id,
+      telegramId: user.telegramId
+    };
+    const tokens = this.issueTokens(requestUser);
+
+    return {
+      ...tokens,
+      user,
+      memberships: await this.db.listChatsForUser(user.id)
+    };
+  }
+
+  async refreshSession(dto: RefreshSessionDto): Promise<AuthSessionResponse> {
+    const refreshToken = dto.refreshToken.trim();
+    if (refreshToken.length === 0 || refreshToken.length > this.maxTokenChars) {
+      throw new UnauthorizedException("Refresh token length is invalid.");
+    }
+
+    const payload = this.verifyRefreshToken(refreshToken);
+    await this.assertRefreshTokenNotReplayed(payload.jti, payload.exp);
+
+    const user = await this.db.getUserById(payload.sub);
+    if (!user || user.telegramId !== payload.telegramId) {
+      throw new UnauthorizedException("Refresh token subject is invalid.");
+    }
+
+    const tokens = this.issueTokens({
+      userId: user.id,
+      telegramId: user.telegramId
+    });
+
+    return {
+      ...tokens,
+      user,
+      memberships: await this.db.listChatsForUser(user.id)
+    };
+  }
+
+  private validateInitData(params: URLSearchParams, rawInitData: string): InitDataValidationResult {
+    const botToken = this.configService.get<string>("TELEGRAM_BOT_TOKEN");
+    const allowInsecure =
+      (this.configService.get<string>("ALLOW_INSECURE_INITDATA", "false") ?? "false").toLowerCase() === "true";
+
+    if (!botToken) {
+      if (allowInsecure) {
+        return {
+          strictMode: false,
+          replayToken: null,
+          authDate: null,
+          replayTtlSeconds: 0
+        };
+      }
+      throw new UnauthorizedException("TELEGRAM_BOT_TOKEN is not configured.");
+    }
+
+    const hash = params.get("hash");
+    if (!hash) {
+      throw new UnauthorizedException("Telegram initData hash is missing.");
+    }
+
+    const authDate = Number(params.get("auth_date"));
+    if (!Number.isFinite(authDate)) {
+      throw new UnauthorizedException("Telegram initData auth_date is missing.");
+    }
+    const maxAge = this.parsePositiveIntEnv("TELEGRAM_INITDATA_MAX_AGE_SECONDS", 300);
+    const futureSkewSeconds = this.parsePositiveIntEnv("TELEGRAM_INITDATA_FUTURE_SKEW_SECONDS", 30);
+    const ageSeconds = Math.floor(Date.now() / 1000) - authDate;
+    if (ageSeconds > maxAge) {
+      throw new ForbiddenException("Telegram initData has expired.");
+    }
+    if (ageSeconds < -futureSkewSeconds) {
+      throw new ForbiddenException("Telegram initData auth_date is too far in the future.");
+    }
+
+    const checkParams = new URLSearchParams(rawInitData);
+    checkParams.delete("hash");
+    const dataCheckString = Array.from(checkParams.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, value]) => `${key}=${value}`)
+      .join("\n");
+
+    const secret = createHmac("sha256", "WebAppData").update(botToken).digest();
+    const digest = createHmac("sha256", secret).update(dataCheckString).digest("hex");
+
+    const hashBuffer = Buffer.from(hash, "hex");
+    const digestBuffer = Buffer.from(digest, "hex");
+    if (hashBuffer.length !== digestBuffer.length || !timingSafeEqual(hashBuffer, digestBuffer)) {
+      throw new UnauthorizedException("Telegram initData signature is invalid.");
+    }
+
+    const queryId = params.get("query_id");
+    return {
+      strictMode: true,
+      replayToken: queryId && queryId.trim().length > 0 ? `query_id:${queryId}` : `hash:${hash}`,
+      authDate,
+      replayTtlSeconds: maxAge + futureSkewSeconds + 5
+    };
+  }
+
+  private parseTelegramUser(params: URLSearchParams): TelegramInitUser {
+    const rawUser = params.get("user");
+    if (!rawUser) {
+      throw new UnauthorizedException("Telegram initData user payload is missing.");
+    }
+
+    try {
+      const parsed = JSON.parse(rawUser) as TelegramInitUser;
+      if (!parsed.id || typeof parsed.id !== "number") {
+        throw new Error("id is missing");
+      }
+      return parsed;
+    } catch {
+      throw new UnauthorizedException("Telegram initData user payload is invalid.");
+    }
+  }
+
+  private async assertInitDataNotReplayed(
+    replayToken: string,
+    telegramUserId: number,
+    authDate: number,
+    ttlSeconds: number
+  ): Promise<void> {
+    const replayKey = `${replayToken}|user:${telegramUserId}|auth:${authDate}`;
+    const firstUse = await this.replayStore.markIfFirstUse(`init:${replayKey}`, Math.max(1, Math.floor(ttlSeconds)));
+    if (!firstUse) {
+      throw new UnauthorizedException("Telegram initData replay detected.");
+    }
+  }
+
+  private parsePositiveIntEnv(key: string, fallback: number): number {
+    const raw = this.configService.get<string>(key);
+    if (!raw || raw.trim().length === 0) {
+      return fallback;
+    }
+
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      return fallback;
+    }
+
+    return Math.floor(parsed);
+  }
+
+  private issueTokens(user: RequestUser): { accessToken: string; refreshToken: string } {
+    const sessionId = randomUUID();
+    return {
+      accessToken: this.jwtService.sign({
+        sub: user.userId,
+        telegramId: user.telegramId,
+        type: "access",
+        sid: sessionId
+      }),
+      refreshToken: this.jwtService.sign(
+        {
+          sub: user.userId,
+          telegramId: user.telegramId,
+          type: "refresh",
+          sid: sessionId,
+          jti: randomUUID()
+        },
+        { expiresIn: "7d" }
+      )
+    };
+  }
+
+  private verifyRefreshToken(token: string): Required<Pick<RefreshTokenPayload, "sub" | "telegramId" | "jti">> & Pick<RefreshTokenPayload, "exp"> {
+    try {
+      const payload = this.jwtService.verify<RefreshTokenPayload>(token, this.jwtVerifyOptions);
+      if (payload.type !== "refresh") {
+        throw new UnauthorizedException("Refresh token type is invalid.");
+      }
+      if (!payload.sub || !Number.isFinite(payload.telegramId) || !payload.jti || payload.jti.trim().length === 0) {
+        throw new UnauthorizedException("Refresh token payload is invalid.");
+      }
+      return {
+        sub: payload.sub,
+        telegramId: payload.telegramId,
+        jti: payload.jti,
+        exp: payload.exp
+      };
+    } catch (error) {
+      if (error instanceof UnauthorizedException) {
+        throw error;
+      }
+      throw new UnauthorizedException("Invalid refresh token.");
+    }
+  }
+
+  private async assertRefreshTokenNotReplayed(jti: string, exp?: number): Promise<void> {
+    const nowMs = Date.now();
+    const replayKey = `refresh:jti:${jti}`;
+    const firstUse = await this.replayStore.markIfFirstUse(replayKey, this.resolveRefreshReplayTtlSeconds(exp, nowMs));
+    if (!firstUse) {
+      throw new UnauthorizedException("Refresh token replay detected.");
+    }
+  }
+
+  private resolveRefreshReplayTtlSeconds(exp: number | undefined, nowMs: number): number {
+    if (typeof exp === "number" && Number.isFinite(exp)) {
+      const remaining = exp * 1000 - nowMs;
+      if (remaining > 0) {
+        return Math.max(1, Math.floor(remaining / 1000));
+      }
+    }
+
+    const fallbackSeconds = this.parsePositiveIntEnv("JWT_REFRESH_REPLAY_FALLBACK_TTL_SECONDS", 7 * 24 * 60 * 60);
+    return fallbackSeconds;
+  }
+}

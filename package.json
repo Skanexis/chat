@@ -1,0 +1,15 @@
+{
+  "name": "phantom-lab-chat",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "build": "pnpm --filter @phantom-lab/api build",
+    "build:web": "pnpm --filter @phantom-lab/web build",
+    "test": "pnpm --filter @phantom-lab/api test",
+    "smoke:postgres": "pnpm --filter @phantom-lab/api smoke:postgres",
+    "dev": "pnpm --filter @phantom-lab/api dev",
+    "dev:web": "pnpm --filter @phantom-lab/web dev",
+    "start": "pnpm --filter @phantom-lab/api start"
+  }
+}

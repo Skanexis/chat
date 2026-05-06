@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.next/
+.env
+.env.local
+pnpm-lock.yaml
+*.log
+*.tsbuildinfo
+deploy/env/*.env
+!deploy/env/*.env.example

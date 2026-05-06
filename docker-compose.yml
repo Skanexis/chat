@@ -1,0 +1,25 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: phantom_lab_chat_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: phantom_lab_chat
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - phantom_lab_chat_pgdata:/var/lib/postgresql/data
+  redis:
+    image: redis:7-alpine
+    container_name: phantom_lab_chat_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - phantom_lab_chat_redis_data:/data
+
+volumes:
+  phantom_lab_chat_pgdata:
+  phantom_lab_chat_redis_data:

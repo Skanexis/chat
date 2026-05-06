@@ -1,0 +1,863 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ChatMode {
+  chat_mode
+  channel_mode
+  hybrid_mode
+}
+
+enum MemberStatus {
+  active
+  readonly
+  muted
+  banned
+}
+
+enum JoinRequestStatus {
+  pending
+  approved
+  rejected
+}
+
+enum JoinApprovalMode {
+  auto
+  manual
+}
+
+enum DisplayAuthorType {
+  user
+  group
+  role_profile
+}
+
+enum SenderMode {
+  as_user
+  as_group
+  as_role_profile
+}
+
+enum SignatureMode {
+  system
+  hidden
+  custom
+}
+
+enum ChannelNotifyMode {
+  off
+  instant
+  digest
+}
+
+enum LimitExceedAction {
+  warn
+  mute
+  reject
+}
+
+enum BroadcastType {
+  scheduled
+  recurring
+  event_triggered
+  digest
+}
+
+enum BroadcastStatus {
+  draft
+  review
+  approved
+  scheduled
+  running
+  paused
+  completed
+  canceled
+}
+
+enum ScheduledMessageStatus {
+  scheduled
+  sent
+  failed
+  canceled
+}
+
+enum KnowledgeArticleStatus {
+  draft
+  review
+  published
+  archived
+}
+
+enum PollStatus {
+  open
+  closed
+}
+
+enum ReminderType {
+  personal
+  team
+  moderator
+}
+
+enum ReminderStatus {
+  scheduled
+  sent
+  failed
+  canceled
+}
+
+enum ReadReceiptMode {
+  off
+  private
+  role_visible
+  global
+}
+
+enum ThreadSubscriptionType {
+  thread
+  message
+}
+
+enum TicketStatus {
+  open
+  in_progress
+  waiting
+  resolved
+  closed
+}
+
+enum TicketPriority {
+  low
+  normal
+  high
+  urgent
+}
+
+enum AutomationTriggerType {
+  message_created
+  member_joined
+  ticket_overdue
+  limit_hit
+}
+
+enum AutomationExecutionStatus {
+  success
+  failed
+  skipped
+}
+
+enum TempRoomStatus {
+  active
+  archived
+}
+
+model User {
+  id         String       @id @default(uuid())
+  telegramId BigInt       @unique
+  username   String?
+  firstName  String?
+  lastName   String?
+  createdAt  DateTime     @default(now())
+  members    ChatMember[]
+  joinRequests JoinRequest[]
+  messages   Message[]
+  reactions  MessageReaction[]
+  scheduledMessages ScheduledMessage[]
+  reminders  Reminder[]
+  bookmarks  Bookmark[]
+  memberTags MemberTag[]
+  memberProfileFields MemberProfileField[]
+  keywordAlerts KeywordAlert[]
+  threadSubscriptions ThreadSubscription[]
+  readReceipts ReadReceipt[]
+  e2eDevices E2EDevice[]
+  readReceiptPreferences ReadReceiptPreference[]
+  reputationEvents ReputationEvent[]
+
+  @@index([telegramId])
+}
+
+model Chat {
+  id                String               @id
+  name              String
+  mode              ChatMode
+  defaultRoleId     String
+  createdAt         DateTime             @default(now())
+  roles             Role[]
+  roleLimits        RoleLimit[]
+  members           ChatMember[]
+  invites           Invite[]
+  joinRequests      JoinRequest[]
+  joinPolicy        JoinPolicy?
+  identities        ChatIdentity[]
+  messages          Message[]
+  messageTranslations MessageTranslation[]
+  messageReactions  MessageReaction[]
+  scheduledMessages ScheduledMessage[]
+  savedMessageViews SavedMessageView[]
+  knowledgeArticles KnowledgeArticle[]
+  polls             Poll[]
+  pollVotes         PollVote[]
+  reminders         Reminder[]
+  bookmarks         Bookmark[]
+  memberTags        MemberTag[]
+  memberProfileFields MemberProfileField[]
+  keywordAlerts     KeywordAlert[]
+  threadSubscriptions ThreadSubscription[]
+  readReceipts      ReadReceipt[]
+  readReceiptPreferences ReadReceiptPreference[]
+  readReceiptPolicy ReadReceiptPolicy?
+  tickets           Ticket[]
+  automationRules   AutomationRule[]
+  automationExecutions AutomationExecution[]
+  tempRooms         TempRoom[]
+  reputationEvents  ReputationEvent[]
+  incidentModeLogs  IncidentModeLog[]
+  audits            AuditLog[]
+  channelNotify     ChannelNotifyConfig?
+  integrationWebhooks IntegrationWebhook[]
+  broadcasts        BroadcastCampaign[]
+  e2eDevices        E2EDevice[]
+}
+
+model Role {
+  id          String       @id @default(uuid())
+  chatId      String
+  name        String
+  priority    Int
+  isSystem    Boolean
+  isDefault   Boolean
+  permissions String[]
+  createdAt   DateTime     @default(now())
+  chat        Chat         @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  members     ChatMember[]
+  limits      RoleLimit?
+
+  @@index([chatId, priority])
+}
+
+model ChatMember {
+  id         String       @id @default(uuid())
+  chatId     String
+  userId     String
+  roleId     String
+  status     MemberStatus
+  mutedUntil DateTime?
+  bannedUntil DateTime?
+  joinedAt   DateTime     @default(now())
+  chat       Chat         @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  user       User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role       Role         @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([chatId, userId])
+  @@index([chatId])
+  @@index([userId])
+}
+
+model Invite {
+  id        String   @id @default(uuid())
+  chatId    String
+  code      String
+  createdBy String
+  approvalMode JoinApprovalMode @default(manual)
+  targetRoleId String?
+  maxUses   Int?
+  usesCount Int      @default(0)
+  expiresAt DateTime?
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  chat      Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+
+  @@unique([chatId, code])
+  @@index([chatId, createdAt])
+  @@index([chatId, revokedAt])
+  @@index([chatId, approvalMode])
+}
+
+model JoinPolicy {
+  chatId               String           @id
+  defaultApprovalMode  JoinApprovalMode
+  defaultTargetRoleId  String?
+  updatedBy            String
+  updatedAt            DateTime         @updatedAt
+  chat                 Chat             @relation(fields: [chatId], references: [id], onDelete: Cascade)
+}
+
+model JoinRequest {
+  id           String            @id @default(uuid())
+  chatId        String
+  userId        String
+  inviteCode    String?
+  note          String?
+  status        JoinRequestStatus
+  reviewedBy    String?
+  reviewedAt    DateTime?
+  rejectReason  String?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  chat          Chat              @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  user          User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([chatId, status, createdAt])
+  @@index([chatId, userId, createdAt])
+}
+
+model ChatIdentity {
+  id        String   @id @default(uuid())
+  chatId    String
+  name      String
+  type      String
+  isActive  Boolean
+  createdBy String
+  createdAt DateTime @default(now())
+  chat      Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+
+  @@index([chatId])
+}
+
+model Message {
+  id                String            @id @default(uuid())
+  chatId            String
+  authorId          String
+  actorUserId       String
+  displayAuthorType DisplayAuthorType
+  displayAuthorId   String
+  senderMode        SenderMode
+  text              String?
+  media             Json?
+  signatureMode     SignatureMode?
+  customSignature   String?
+  replyToId         String?
+  isEncrypted       Boolean           @default(false)
+  encryptedPayload  Json?
+  isDeleted         Boolean           @default(false)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  chat              Chat              @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  author            User              @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  reactions         MessageReaction[]
+  translations      MessageTranslation[]
+  readReceipts      ReadReceipt[]
+
+  @@index([chatId, createdAt])
+  @@index([chatId, authorId, createdAt])
+}
+
+model E2EDevice {
+  id                    String   @id @default(uuid())
+  chatId                String
+  userId                String
+  deviceId              String
+  algorithm             String
+  identityKey           String
+  signedPreKey          String
+  oneTimePreKeys        String[]
+  fallbackKey           String?
+  isActive              Boolean  @default(true)
+  lastPreKeyRotationAt  DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  chat                  Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([chatId, userId, deviceId])
+  @@index([chatId, userId, isActive])
+  @@index([chatId, isActive, updatedAt])
+}
+
+model MessageReaction {
+  id        String   @id @default(uuid())
+  chatId    String
+  messageId String
+  userId    String
+  reaction  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  chat      Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+  @@index([chatId, messageId, createdAt])
+}
+
+model MessageTranslation {
+  id             String   @id @default(uuid())
+  chatId         String
+  messageId      String
+  targetLanguage String
+  sourceLanguage String
+  sourceText     String
+  translatedText String
+  provider       String
+  createdBy      String
+  updatedBy      String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  chat           Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  message        Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([chatId, messageId, targetLanguage])
+  @@index([chatId, messageId, createdAt])
+  @@index([chatId, targetLanguage])
+}
+
+model ScheduledMessage {
+  id            String                 @id @default(uuid())
+  chatId        String
+  userId        String
+  payload       Json
+  scheduledAt   DateTime
+  status        ScheduledMessageStatus
+  sentMessageId String?
+  sentAt        DateTime?
+  canceledAt    DateTime?
+  error         String?
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+  chat          Chat                   @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  user          User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([chatId, userId, scheduledAt])
+  @@index([status, scheduledAt])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  chatId     String
+  actorId    String
+  action     String
+  targetType String
+  targetId   String
+  payload    Json
+  createdAt  DateTime @default(now())
+  chat       Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+
+  @@index([chatId, createdAt])
+}
+
+model ChannelNotifyConfig {
+  chatId               String           @id
+  enabled              Boolean
+  mode                 ChannelNotifyMode
+  template             String
+  digestIntervalMinutes Int
+  updatedBy            String
+  updatedAt            DateTime         @updatedAt
+  chat                 Chat             @relation(fields: [chatId], references: [id], onDelete: Cascade)
+}
+
+model SavedMessageView {
+  id        String   @id @default(uuid())
+  chatId    String
+  userId    String
+  name      String
+  filters   Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  chat      Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+
+  @@index([chatId, userId, updatedAt])
+}
+
+model KnowledgeArticle {
+  id          String                 @id @default(uuid())
+  chatId      String
+  title       String
+  content     String
+  status      KnowledgeArticleStatus
+  category    String?
+  tags        String[]
+  version     Int                    @default(1)
+  createdBy   String
+  updatedBy   String
+  publishedAt DateTime?
+  archivedAt  DateTime?
+  createdAt   DateTime               @default(now())
+  updatedAt   DateTime               @updatedAt
+  chat        Chat                   @relation(fields: [chatId], references: [id], onDelete: Cascade)
+
+  @@index([chatId, createdAt])
+  @@index([chatId, status])
+}
+
+model Poll {
+  id                   String     @id @default(uuid())
+  chatId               String
+  question             String
+  options              String[]
+  allowMultiple        Boolean
+  isAnonymous          Boolean
+  isQuiz               Boolean
+  correctOptionIndexes Int[]
+  allowedRoleIds       String[]
+  closesAt             DateTime?
+  status               PollStatus
+  createdBy            String
+  createdAt            DateTime   @default(now())
+  updatedAt            DateTime   @updatedAt
+  chat                 Chat       @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  votes                PollVote[]
+
+  @@index([chatId, createdAt])
+  @@index([chatId, status])
+}
+
+model PollVote {
+  id            String   @id @default(uuid())
+  chatId        String
+  pollId        String
+  userId        String
+  optionIndexes Int[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  chat          Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  poll          Poll     @relation(fields: [pollId], references: [id], onDelete: Cascade)
+
+  @@unique([pollId, userId])
+  @@index([chatId, pollId, createdAt])
+}
+
+model Reminder {
+  id             String         @id @default(uuid())
+  chatId         String
+  userId         String
+  messageId      String
+  reminderType   ReminderType
+  targetRoleId   String?
+  note           String?
+  remindAt       DateTime
+  telegramNotify Boolean        @default(false)
+  status         ReminderStatus
+  sentAt         DateTime?
+  canceledAt     DateTime?
+  error          String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  chat           Chat           @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([chatId, userId, remindAt])
+  @@index([status, remindAt])
+}
+
+model Bookmark {
+  id         String   @id @default(uuid())
+  chatId     String
+  userId     String
+  messageId  String
+  collection String
+  tags       String[]
+  note       String?
+  isShared   Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  chat       Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([chatId, userId, messageId, collection, isShared])
+  @@index([chatId, userId, createdAt])
+  @@index([chatId, messageId])
+}
+
+model MemberTag {
+  id        String   @id @default(uuid())
+  chatId    String
+  userId    String
+  tag       String
+  createdBy String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  chat      Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([chatId, userId, tag])
+  @@index([chatId, tag])
+  @@index([chatId, userId, createdAt])
+}
+
+model MemberProfileField {
+  id        String   @id @default(uuid())
+  chatId    String
+  userId    String
+  key       String
+  value     String
+  createdBy String
+  updatedBy String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  chat      Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([chatId, userId, key])
+  @@index([chatId, userId, createdAt])
+  @@index([chatId, key])
+}
+
+model KeywordAlert {
+  id                 String   @id @default(uuid())
+  chatId             String
+  userId             String
+  keyword            String
+  normalizedKeyword  String
+  isRegex            Boolean
+  caseSensitive      Boolean
+  dedupWindowSeconds Int
+  isActive           Boolean  @default(true)
+  lastTriggeredAt    DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  chat               Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([chatId, userId, normalizedKeyword, isRegex, caseSensitive])
+  @@index([chatId, userId, createdAt])
+  @@index([chatId, isActive])
+}
+
+model ThreadSubscription {
+  id                 String                 @id @default(uuid())
+  chatId             String
+  userId             String
+  messageId          String
+  subscriptionType   ThreadSubscriptionType
+  telegramNotify     Boolean                @default(false)
+  dedupWindowSeconds Int                    @default(300)
+  isActive           Boolean                @default(true)
+  lastTriggeredAt    DateTime?
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+  chat               Chat                   @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  user               User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([chatId, userId, messageId, subscriptionType])
+  @@index([chatId, userId, createdAt])
+  @@index([chatId, isActive])
+}
+
+model ReadReceipt {
+  id        String   @id @default(uuid())
+  chatId    String
+  messageId String
+  userId    String
+  readAt    DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  chat      Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+  @@index([chatId, messageId, readAt])
+}
+
+model ReadReceiptPreference {
+  chatId    String
+  userId    String
+  mode      ReadReceiptMode
+  updatedAt DateTime        @updatedAt
+  chat      Chat            @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([chatId, userId])
+  @@index([chatId, userId])
+}
+
+model ReadReceiptPolicy {
+  chatId             String   @id
+  allowCrossRoleView Boolean  @default(true)
+  updatedBy          String
+  updatedAt          DateTime @updatedAt
+  chat               Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+}
+
+model IntegrationWebhook {
+  id             String   @id @default(uuid())
+  chatId         String
+  name           String
+  url            String
+  secret         String
+  events         String[]
+  enabled        Boolean  @default(true)
+  createdBy      String
+  updatedBy      String
+  lastDeliveredAt DateTime?
+  lastError      String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  chat           Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+
+  @@index([chatId, createdAt])
+  @@index([chatId, enabled])
+}
+
+model RoleLimit {
+  roleId              String            @id
+  chatId              String
+  slowmodeSeconds     Int               @default(0)
+  messagesPerDay      Int?
+  messagesPerHour     Int?
+  mediaPerDay         Int?
+  linksPerDay         Int?
+  mentionsPerDay      Int?
+  burstCount          Int?
+  burstWindowSeconds  Int?
+  exceedAction        LimitExceedAction @default(reject)
+  exceedMuteSeconds   Int?
+  updatedAt           DateTime          @updatedAt
+  role                Role              @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  chat                Chat              @relation(fields: [chatId], references: [id], onDelete: Cascade)
+
+  @@index([chatId])
+}
+
+model BroadcastCampaign {
+  id                 String          @id @default(uuid())
+  chatId             String
+  name               String
+  broadcastType      BroadcastType
+  audience           Json
+  content            Json
+  schedule           Json
+  senderMode         SenderMode
+  identityId         String?
+  requiresApproval   Boolean
+  rateLimitPerMinute Int?
+  status             BroadcastStatus
+  createdBy          String
+  approvedBy         String?
+  approvedAt         DateTime?
+  scheduledAt        DateTime?
+  startedAt          DateTime?
+  completedAt        DateTime?
+  canceledAt         DateTime?
+  pausedAt           DateTime?
+  targetCount        Int             @default(0)
+  sentCount          Int             @default(0)
+  failedCount        Int             @default(0)
+  lastRunAt          DateTime?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  chat               Chat            @relation(fields: [chatId], references: [id], onDelete: Cascade)
+
+  @@index([chatId, createdAt])
+  @@index([chatId, status])
+}
+
+model Ticket {
+  id              String        @id @default(uuid())
+  chatId          String
+  sourceMessageId String
+  status          TicketStatus
+  priority        TicketPriority
+  assigneeId      String?
+  slaDueAt        DateTime?
+  slaBreachedAt   DateTime?
+  labels          String[]
+  createdBy       String
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  chat            Chat          @relation(fields: [chatId], references: [id], onDelete: Cascade)
+
+  @@index([chatId, createdAt])
+  @@index([chatId, status])
+  @@index([chatId, assigneeId])
+  @@index([chatId, slaDueAt])
+  @@index([slaBreachedAt])
+}
+
+model AutomationRule {
+  id          String                @id @default(uuid())
+  chatId      String
+  name        String
+  triggerType AutomationTriggerType
+  conditions  Json
+  actions     Json
+  isEnabled   Boolean
+  createdBy   String
+  updatedBy   String
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+  chat        Chat                  @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  executions  AutomationExecution[]
+
+  @@index([chatId, createdAt])
+  @@index([chatId, triggerType])
+}
+
+model AutomationExecution {
+  id           String                  @id @default(uuid())
+  chatId        String
+  ruleId        String
+  triggerType   AutomationTriggerType
+  inputPayload  Json
+  status        AutomationExecutionStatus
+  actionsCount  Int
+  error         String?
+  executedBy    String
+  startedAt     DateTime
+  finishedAt    DateTime
+  createdAt     DateTime               @default(now())
+  chat          Chat                   @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  rule          AutomationRule         @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  @@index([chatId, ruleId, createdAt])
+  @@index([chatId, triggerType, createdAt])
+}
+
+model TempRoom {
+  id                  String         @id @default(uuid())
+  chatId              String
+  name                String
+  description         String?
+  startsAt            DateTime?
+  endsAt              DateTime?
+  status              TempRoomStatus
+  inheritPermissions  Boolean
+  permissionOverrides Json
+  createdBy           String
+  archivedAt          DateTime?
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+  chat                Chat           @relation(fields: [chatId], references: [id], onDelete: Cascade)
+
+  @@index([chatId, createdAt])
+  @@index([chatId, status])
+}
+
+model ReputationEvent {
+  id         String   @id @default(uuid())
+  chatId     String
+  userId     String
+  delta      Int
+  reason     String
+  sourceType String
+  sourceId   String?
+  actorId    String
+  createdAt  DateTime @default(now())
+  chat       Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([chatId, userId, createdAt])
+  @@index([chatId, createdAt])
+}
+
+model IncidentModeLog {
+  id             String   @id @default(uuid())
+  chatId         String
+  enabledBy      String
+  enabledAt      DateTime
+  disabledAt     DateTime?
+  policySnapshot Json
+  reason         String
+  chat           Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+
+  @@index([chatId, enabledAt])
+  @@index([chatId, disabledAt])
+}

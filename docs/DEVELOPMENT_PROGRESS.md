@@ -1,0 +1,789 @@
+# Development Progress
+
+## Current Phase
+`Phase 3 in progress (2026-04-27): E2E message transport + backend performance hardening`
+
+## Completed
+- [x] Frontend design-system acceptance closure delivered (2026-04-29):
+  - [x] added final admin edit wiring for PATCH contracts:
+    - [x] role update (`updateRole`) in roles admin
+    - [x] invite update (`updateInvite`) in invites admin
+    - [x] broadcast update (`updateBroadcastCampaign`) in broadcasts admin
+  - [x] full release smoke gate re-run green:
+    - [x] `pnpm --filter @phantom-lab/api build`
+    - [x] `pnpm --filter @phantom-lab/api test`
+    - [x] `pnpm --filter @phantom-lab/api smoke:hardening`
+    - [x] `pnpm --filter @phantom-lab/api smoke:frontend-p0`
+    - [x] `pnpm --filter @phantom-lab/web build`
+  - [x] acceptance report published:
+    - [x] `docs/FRONTEND_ACCEPTANCE_REPORT_2026-04-29.md`
+- [x] Workspace initialized (`pnpm` monorepo, TypeScript base config).
+- [x] API service scaffolded (`NestJS + Fastify + Socket.IO`).
+- [x] Health endpoint added: `GET /v1/health`.
+- [x] Core in-memory domain storage added (users/chats/roles/members/messages/identities/audit).
+- [x] Telegram Mini App auth endpoint implemented: `POST /v1/auth/telegram`.
+- [x] JWT auth guard implemented for protected HTTP routes.
+- [x] Auth validation hardening implemented (TЗ 13.1):
+  - [x] `auth_date` future-skew guard (`TELEGRAM_INITDATA_FUTURE_SKEW_SECONDS`)
+  - [x] replay protection for signed `initData` (bound to `query_id/hash + user + auth_date`)
+  - [x] process-local replay cache cleanup tuning (`TELEGRAM_INITDATA_REPLAY_CLEANUP_INTERVAL_SECONDS`)
+  - [x] unit tests for valid flow, replay reject, future-date reject, insecure-dev mode
+- [x] Chat endpoints implemented:
+  - [x] `GET /v1/chats/:chatId`
+  - [x] `GET /v1/chats/:chatId/messages`
+  - [x] `POST /v1/chats/:chatId/messages`
+  - [x] `PATCH /v1/chats/:chatId/messages/:messageId`
+  - [x] `DELETE /v1/chats/:chatId/messages/:messageId`
+- [x] Identity endpoints for `as_group` implemented:
+  - [x] `GET /v1/chats/:chatId/identities`
+  - [x] `POST /v1/chats/:chatId/identities`
+  - [x] `PATCH /v1/chats/:chatId/identities/:identityId`
+- [x] RBAC checks added for core operations.
+- [x] RBAC hierarchy hardening (priority-based safety) implemented:
+  - [x] centralized policy guards: `assertCanManageMember`, `assertCanManageRole`, `assertCanCreateRoleWithPriority`
+  - [x] moderation operations now enforce actor-target role priority constraints (`mute|timeout|timeout.clear|unmute|kick|ban|unban`)
+  - [x] role operations now enforce priority constraints (`create|update|assign|unassign`)
+- [x] Member-state access hardening implemented:
+  - [x] centralized member-state guards in policy layer (`assertMemberCanAccess`, `assertMemberCanOperate`)
+  - [x] banned users blocked from chat read/search/snapshot flows
+  - [x] non-active users (`readonly|muted|banned`) blocked from admin/control-plane operations (roles/limits/integrations/notifications/broadcasts/exports)
+- [x] Roles API implemented:
+  - [x] `GET /v1/chats/:chatId/roles`
+  - [x] `POST /v1/chats/:chatId/roles`
+  - [x] `PATCH /v1/chats/:chatId/roles/:roleId`
+  - [x] `POST /v1/chats/:chatId/roles/:roleId/permissions/grant`
+  - [x] `POST /v1/chats/:chatId/roles/:roleId/permissions/revoke`
+  - [x] `POST /v1/chats/:chatId/roles/:roleId/assign`
+  - [x] `POST /v1/chats/:chatId/roles/:roleId/unassign`
+  - [x] member role reassignment wired through storage adapters (`inmemory` + `postgres`) + audit/events (`role.assign|role.unassign`, `member.updated`)
+- [x] Channel notification config endpoints implemented:
+  - [x] `PATCH /v1/chats/:chatId/channel-notify/config`
+  - [x] `POST /v1/chats/:chatId/channel-notify/test` (dry-run rendering)
+- [x] Switchable storage adapter implemented (`STORAGE_DRIVER=inmemory|postgres`).
+- [x] Prisma schema added for core entities (users/chats/roles/members/messages/identities/audit/channel_notify).
+- [x] `PrismaDatabaseService` implemented with base-seed bootstrap.
+- [x] All core services converted to async storage contract (auth/chat/roles/notifications/policy).
+- [x] PostgreSQL local infra added (`docker-compose.yml` + quickstart doc).
+- [x] WS gateway implemented:
+  - [x] `chat.join`
+  - [x] `message.send`
+  - [x] `message.edit`
+  - [x] `message.delete`
+  - [x] `reaction.set`
+  - [x] `reaction.remove`
+  - [x] `typing.start`
+  - [x] `typing.stop`
+  - [x] server events `chat.snapshot|message.created|updated|deleted|message.reaction.updated`
+- [x] Audit logging for message/role/identity changes.
+- [x] Limits/Timers module implemented:
+  - [x] `GET /v1/chats/:chatId/limits`
+  - [x] `PATCH /v1/chats/:chatId/limits/roles/:roleId`
+  - [x] `POST /v1/chats/:chatId/members/:userId/mute`
+  - [x] `POST /v1/chats/:chatId/members/:userId/timeout`
+  - [x] `POST /v1/chats/:chatId/members/:userId/timeout/clear`
+  - [x] `POST /v1/chats/:chatId/members/:userId/kick`
+- [x] Member moderation management expanded:
+  - [x] `GET /v1/chats/:chatId/members`
+  - [x] `POST /v1/chats/:chatId/members/:userId/unmute`
+  - [x] `POST /v1/chats/:chatId/members/:userId/kick`
+  - [x] `POST /v1/chats/:chatId/members/:userId/ban`
+  - [x] `POST /v1/chats/:chatId/members/:userId/unban`
+  - [x] audit logs for `member.unmute|member.kick|member.ban|member.unban`
+  - [x] dedicated timeout-clear audit action: `member.timeout.clear`
+  - [x] kick semantics for current MVP: target switched to `readonly` status (+ readonly role when available)
+  - [x] priority guardrails: moderator cannot act on equal/higher-priority member
+  - [x] WS/event-bus fanout for member moderation updates (`member.updated`, `member.banned`)
+  - [x] timeout/unmute permissions aligned with canonical keys (`member.timeout.set`, `member.timeout.clear`) with backward-compatible fallback checks
+  - [x] guard against self-ban/self-kick + explicit `NotFound` for moderation on non-member targets
+- [x] Role-based message limits enforcement in `chat.createMessage`:
+  - [x] slowmode (`slowmodeSeconds`)
+  - [x] caps: `messagesPerDay`, `messagesPerHour`, `mediaPerDay`, `linksPerDay`, `mentionsPerDay`
+  - [x] burst control (`burstCount` + `burstWindowSeconds`)
+  - [x] exceed actions: `reject|warn|mute` (with `exceedMuteSeconds`)
+- [x] Timeout auto-release on message send path when `mutedUntil` expired.
+- [x] Prisma schema extended with persistent `RoleLimit` model and DB adapter support parity (`inmemory` + `postgres`).
+- [x] Broadcast campaigns API implemented:
+  - [x] `GET /v1/chats/:chatId/broadcasts`
+  - [x] `POST /v1/chats/:chatId/broadcasts`
+  - [x] `PATCH /v1/chats/:chatId/broadcasts/:campaignId`
+  - [x] `POST /v1/chats/:chatId/broadcasts/:campaignId/approve`
+  - [x] `POST /v1/chats/:chatId/broadcasts/:campaignId/schedule`
+  - [x] `POST /v1/chats/:chatId/broadcasts/:campaignId/publish-now`
+  - [x] `POST /v1/chats/:chatId/broadcasts/:campaignId/pause`
+  - [x] `POST /v1/chats/:chatId/broadcasts/:campaignId/resume`
+  - [x] `POST /v1/chats/:chatId/broadcasts/:campaignId/cancel`
+  - [x] `GET /v1/chats/:chatId/broadcasts/:campaignId/stats`
+- [x] Broadcast workflow/state machine added (`draft/review/approved/scheduled/running/paused/completed/canceled`).
+- [x] Broadcast execution scheduler added (process-local timer queue with WS events `broadcast.state.changed|broadcast.delivery.progress`).
+- [x] Prisma schema + storage adapters extended for persistent `BroadcastCampaign` model (`inmemory` + `postgres`).
+- [x] Broadcast queue driver abstraction implemented:
+  - [x] `inmemory` queue driver (timer-based fallback)
+  - [x] `bullmq` queue driver + worker (`BROADCAST_QUEUE_DRIVER=bullmq`)
+  - [x] retry/backoff + dead-letter queue support for failed jobs
+  - [x] queue-level throttle/limiter settings via env vars
+- [x] Broadcast execution moved to dedicated worker/executor service (decoupled from HTTP service).
+- [x] Redis service added to local infra (`docker-compose.yml`) for BullMQ mode.
+- [x] Telegram channel notification pipeline implemented:
+  - [x] dedicated `TelegramBotService` (Bot API sendMessage + retry/timeout)
+  - [x] event-driven `ChannelNotifyPipelineService` on `message.created`
+  - [x] delivery modes: `instant` + `digest`
+  - [x] quiet-hours-aware behavior via env-configured window/timezone
+  - [x] audit records for instant/digest dispatch attempts
+- [x] `POST /v1/chats/:chatId/channel-notify/test` enhanced with optional `deliver=true` execution path.
+- [x] Test baseline added (Vitest):
+  - [x] Policy resolution unit tests (`PolicyService`)
+  - [x] Policy hierarchy unit tests (`PolicyService`: role/member/manage/create-priority constraints)
+  - [x] Policy member-state unit tests (`PolicyService`: banned/access + non-active/operate guards)
+  - [x] Message permission matrix tests (`ChatService`: own vs any, media/as_group deny for member, wildcard allow)
+  - [x] Auth validation tests (`AuthService`: valid/replay/future-skew/insecure)
+  - [x] Member moderation tests (`LimitsService`: list/mute/unmute/timeout/timeout.clear/kick/ban/unban + hierarchy/state constraints)
+  - [x] Role assignment tests (`RolesService`: assign/unassign permission matrix + audit/events + hierarchy/state constraints)
+  - [x] Chat access-state tests (`ChatService`: banned member read/search denied)
+  - [x] WS gateway tests (`ChatGateway`: join/snapshot/edit/delete/reactions/typing/auth)
+  - [x] `pnpm --filter @phantom-lab/api test` passes (`80/80`)
+- [x] Message anti-abuse validation added (TЗ 13.2):
+  - [x] URL parsing + domain policy (`CHAT_LINK_DENYLIST` / `CHAT_LINK_ALLOWLIST`)
+  - [x] duplicate/flood guard rails (`CHAT_DUPLICATE_*`, `CHAT_FLOOD_*`)
+  - [x] blocked keyword/regex checks (`CHAT_BLOCKED_KEYWORDS`, `CHAT_BLOCKED_REGEX_PATTERNS`)
+  - [x] max length by role (`CHAT_MAX_TEXT_LENGTH_DEFAULT`, `CHAT_MAX_TEXT_LENGTH_BY_ROLE_JSON`)
+  - [x] media URL/type policy (`CHAT_MEDIA_ALLOWED_TYPES`, `CHAT_MEDIA_ALLOWED_EXTENSIONS_JSON`)
+  - [x] integrated in `ChatService.ensureCanSend` before role-limit enforcement
+  - [x] tests expanded and still passing in latest baseline (`80/80`, `vitest`)
+- [x] Broadcast validation guardrails added (TЗ 13.4):
+  - [x] audience scope validation (statuses/roles/locale/inactive range constraints)
+  - [x] campaign-per-chat creation cooldown (`BROADCAST_CREATE_COOLDOWN_SECONDS`)
+  - [x] quiet-hours + blackout window checks for schedule/publish
+  - [x] safe placeholder validation for campaign text templates
+  - [x] idempotency-key protection for `schedule` and `publish-now`
+- [x] Anti-abuse auto-sanctions implemented (TЗ 13.3):
+  - [x] strike-based escalation `warn -> short_mute -> long_mute -> ban/manual_review`
+  - [x] configurable steps/timeouts (`CHAT_AUTOSANCTION_*`)
+  - [x] audit trail for each violation (`anti_abuse.violation`)
+  - [x] runtime smoke validated (`1st=429 warning`, `2nd=403 mute`)
+- [x] Webhook integrations implemented (TЗ 7.9 + permissions from 5.8):
+  - [x] webhook management API:
+    - [x] `GET /v1/chats/:chatId/webhooks`
+    - [x] `POST /v1/chats/:chatId/webhooks`
+    - [x] `PATCH /v1/chats/:chatId/webhooks/:webhookId`
+    - [x] `POST /v1/chats/:chatId/webhooks/:webhookId/rotate-secret`
+    - [x] `POST /v1/chats/:chatId/webhooks/:webhookId/disable`
+  - [x] RBAC checks for `integration.webhook.create|rotate_secret|disable`
+  - [x] persistent storage parity for webhooks (`inmemory` + `postgres` + Prisma model `IntegrationWebhook`)
+  - [x] event-driven webhook dispatcher with HMAC signature, delivery id/idempotency headers, retry/backoff, and delivery audit trail
+  - [x] realtime events expanded with `member.updated` / `member.banned` and WS fanout for member updates
+- [x] History export implemented (TЗ 7.9):
+  - [x] `GET /v1/chats/:chatId/export/history`
+  - [x] formats: `jsonl` and `csv`
+  - [x] server-side permission check: `audit.export`
+  - [x] filter constraints: `from`, `to`, `author_id`, `content_type`, `limit`
+  - [x] export actions logged to audit (`history.export`)
+- [x] Message search and navigation baseline implemented (TЗ 7.6):
+  - [x] `GET /v1/chats/:chatId/messages/search`
+  - [x] `GET /v1/chats/:chatId/messages/pinned`
+  - [x] `POST /v1/chats/:chatId/messages/:messageId/pin`
+  - [x] `POST /v1/chats/:chatId/messages/:messageId/unpin`
+  - [x] `GET /v1/chats/:chatId/messages/:messageId/reactions`
+  - [x] `POST /v1/chats/:chatId/messages/:messageId/reactions`
+  - [x] `DELETE /v1/chats/:chatId/messages/:messageId/reactions`
+  - [x] `GET /v1/chats/:chatId/messages/saved-views`
+  - [x] `POST /v1/chats/:chatId/messages/saved-views`
+  - [x] `DELETE /v1/chats/:chatId/messages/saved-views/:viewId`
+  - [x] filters: `q`, `author_id`, `from`, `to`, `content_type`, `media_type`, `limit`
+  - [x] server-side permission check: `chat.view`
+  - [x] pin/unpin permission checks: `message.pin`, `message.unpin`
+  - [x] reaction permission check: `message.react`
+  - [x] search action audit logs (`message.search`)
+  - [x] saved views persisted (`inmemory` + `postgres`, model `SavedMessageView`)
+  - [x] reactions persisted (`inmemory` + `postgres`, model `MessageReaction`) + WS event `message.reaction.updated`
+- [x] Scheduled messages baseline implemented (TЗ 7.3):
+  - [x] `GET /v1/chats/:chatId/messages/scheduled`
+  - [x] `POST /v1/chats/:chatId/messages/scheduled`
+  - [x] `POST /v1/chats/:chatId/messages/scheduled/:scheduledMessageId/cancel`
+  - [x] in-process scheduler service with timer registration/recovery on module init
+  - [x] execution path reuses `chat.createMessage` (permission/anti-abuse/limits re-check at execution)
+  - [x] statuses: `scheduled|sent|failed|canceled`
+  - [x] persistence parity (`inmemory` + `postgres`, model `ScheduledMessage`)
+- [x] PostgreSQL + Docker closure smoke completed (2026-04-24):
+  - [x] `docker compose up -d postgres` + container readiness confirmed
+  - [x] Prisma generate + migration applied in local Postgres (`init_postgres_smoke`)
+  - [x] full smoke in `STORAGE_DRIVER=postgres` completed:
+    - [x] `auth -> chat -> message`
+    - [x] permission checks for `member` (`roles` + `channel-notify/config` => expected `403`)
+    - [x] owner flow checks (`roles` list/create + `channel-notify/config` + `channel-notify/test`)
+- [x] Phase 2 large block: `tickets + automation rules + incident mode` (2026-04-24):
+  - [x] Tickets API baseline:
+    - [x] `POST /v1/chats/:chatId/tickets`
+    - [x] `PATCH /v1/chats/:chatId/tickets/:ticketId`
+    - [x] workflow guardrails for status transitions (`open|in_progress|waiting|resolved|closed`)
+    - [x] RBAC checks for `ticket.create|ticket.assign|ticket.close`
+    - [x] audit trail + realtime event `ticket.updated`
+  - [x] Automation rules API baseline:
+    - [x] `POST /v1/chats/:chatId/automation/rules`
+    - [x] `PATCH /v1/chats/:chatId/automation/rules/:ruleId`
+    - [x] RBAC checks for `automation.rule.create|automation.rule.update`
+    - [x] static safety-check against recursive action patterns
+    - [x] audit trail for create/update
+  - [x] Incident mode API baseline:
+    - [x] `POST /v1/chats/:chatId/incident-mode/enable`
+    - [x] `POST /v1/chats/:chatId/incident-mode/disable`
+    - [x] RBAC checks for `incident_mode.enable|incident_mode.disable|incident_mode.policy.edit`
+    - [x] persistent incident mode logs + active-state resolution
+    - [x] audit trail + realtime event `incident_mode.changed`
+  - [x] Storage parity delivered (`inmemory` + `postgres`) for:
+    - [x] `Ticket`
+    - [x] `AutomationRule`
+    - [x] `IncidentModeLog`
+  - [x] Prisma schema + migration applied:
+    - [x] `20260424113320_phase2_tickets_automation_incident`
+  - [x] runtime smoke in `STORAGE_DRIVER=postgres`:
+    - [x] `tickets` create/update
+    - [x] `automation` create/update
+    - [x] `incident-mode` enable/disable
+- [x] Phase 2 large block: `knowledge base + polls/quizzes + unread summary` (2026-04-24):
+  - [x] Knowledge base API baseline:
+    - [x] `POST /v1/chats/:chatId/knowledge/articles`
+    - [x] `PATCH /v1/chats/:chatId/knowledge/articles/:articleId`
+    - [x] statuses/workflow guardrails (`draft|review|published|archived`) + transition validation
+    - [x] RBAC checks for `knowledge.article.create|update|publish|archive`
+    - [x] versioning + audit trail for create/update
+  - [x] Polls/Quizzes API baseline:
+    - [x] `POST /v1/chats/:chatId/polls`
+    - [x] `POST /v1/chats/:chatId/polls/:pollId/vote`
+    - [x] `POST /v1/chats/:chatId/polls/:pollId/close`
+    - [x] `GET /v1/chats/:chatId/polls/:pollId/results`
+    - [x] vote-window/no-repeat guards + option/correct-answer validators
+    - [x] RBAC checks for `message.send.poll|poll.quiz.create|poll.quiz.close|poll.quiz.results.view`
+    - [x] audit trail for create/vote/close
+  - [x] Smart unread summary baseline:
+    - [x] `GET /v1/chats/:chatId/unread-summary`
+    - [x] filters: `mentions_only|moderation_only|announcements_only|since`
+    - [x] RBAC check `summary.unread.generate`
+    - [x] audit trail (`summary.unread.generate`)
+  - [x] Storage parity delivered (`inmemory` + `postgres`) for:
+    - [x] `KnowledgeArticle`
+    - [x] `Poll`
+    - [x] `PollVote`
+  - [x] Prisma schema + migration applied:
+    - [x] `20260424115029_phase2_knowledge_polls_unread`
+  - [x] runtime smoke in `STORAGE_DRIVER=postgres`:
+    - [x] `knowledge` create/publish
+    - [x] `polls` create/vote/results
+    - [x] `unread-summary` generation (mentions filter)
+- [x] Phase 2 large block: `keyword alerts + read receipts/privacy + reminders/drafts hardening` (2026-04-24):
+  - [x] Reminders API baseline:
+    - [x] `POST /v1/chats/:chatId/reminders`
+    - [x] `GET /v1/chats/:chatId/reminders`
+    - [x] `POST /v1/chats/:chatId/reminders/:reminderId/cancel`
+    - [x] scheduler + status flow (`scheduled|sent|failed|canceled`)
+    - [x] RBAC checks for `reminder.create|reminder.manage.own`
+  - [x] Keyword alerts API baseline:
+    - [x] `POST /v1/chats/:chatId/alerts/keywords`
+    - [x] `GET /v1/chats/:chatId/alerts/keywords`
+    - [x] `DELETE /v1/chats/:chatId/alerts/keywords/:alertId`
+    - [x] max alerts per user + dedup window controls
+    - [x] event-driven trigger on `message.created` with audit trail
+  - [x] Read receipts + privacy baseline:
+    - [x] `POST /v1/chats/:chatId/read-receipts/:messageId/mark`
+    - [x] `GET /v1/chats/:chatId/read-receipts/:messageId`
+    - [x] `GET /v1/chats/:chatId/read-receipts/privacy`
+    - [x] `PATCH /v1/chats/:chatId/read-receipts/privacy`
+    - [x] privacy modes (`off|private|role_visible|global`) + cross-role visibility policy
+    - [x] aggregated response model (`visible/hidden` readers + `byRole`)
+  - [x] Drafts hardening in scheduled messages:
+    - [x] permission checks `draft.create|draft.schedule_send|draft.delete`
+    - [x] pending drafts limit (`DRAFT_PENDING_LIMIT`)
+    - [x] max schedule horizon fallback (`DRAFT_SEND_MAX_DELAY_HOURS` -> `SCHEDULED_MESSAGE_MAX_DELAY_HOURS`)
+  - [x] Storage parity delivered (`inmemory` + `postgres`) for:
+    - [x] `Reminder`
+    - [x] `KeywordAlert`
+    - [x] `ReadReceipt`
+    - [x] `ReadReceiptPreference`
+    - [x] `ReadReceiptPolicy`
+  - [x] Prisma schema + migration applied:
+    - [x] `20260424121749_phase2_alerts_read_receipts_reminders`
+  - [x] validation:
+    - [x] `pnpm --filter @phantom-lab/api build`
+    - [x] `pnpm --filter @phantom-lab/api test` (`80/80`)
+- [x] Phase 2 next large block: `drafts/bookmarks API baseline + thread subscriptions` (2026-04-25):
+  - [x] Drafts API baseline aliases added:
+    - [x] `GET /v1/chats/:chatId/drafts`
+    - [x] `POST /v1/chats/:chatId/drafts`
+    - [x] `DELETE /v1/chats/:chatId/drafts/:draftId`
+    - [x] wired to existing scheduled-drafts execution path (re-check permissions/limits on execute)
+  - [x] Bookmarks API baseline:
+    - [x] `POST /v1/chats/:chatId/bookmarks`
+    - [x] `GET /v1/chats/:chatId/bookmarks`
+    - [x] `DELETE /v1/chats/:chatId/bookmarks/:bookmarkId`
+    - [x] RBAC checks for `bookmark.create|bookmark.collection.manage`
+    - [x] duplicate-key upsert behavior (`messageId + collection + shared`)
+    - [x] audit trail for `bookmark.create|bookmark.update|bookmark.delete`
+  - [x] Thread subscriptions baseline:
+    - [x] `POST /v1/chats/:chatId/thread-subscriptions`
+    - [x] `GET /v1/chats/:chatId/thread-subscriptions`
+    - [x] `DELETE /v1/chats/:chatId/thread-subscriptions/:subscriptionId`
+    - [x] event-driven trigger on `message.created` replies with dedup-window control
+    - [x] WS fanout event `thread.subscription.triggered`
+    - [x] audit trail for `thread.subscription.create|update|delete|trigger`
+  - [x] Storage parity delivered (`inmemory` + `postgres`) for:
+    - [x] `Bookmark`
+    - [x] `ThreadSubscription`
+  - [x] Prisma schema + migration applied:
+    - [x] `20260425100000_phase2_bookmarks_thread_subscriptions`
+  - [x] validation:
+    - [x] `pnpm --filter @phantom-lab/api build`
+    - [x] `pnpm --filter @phantom-lab/api test` (`88/88`)
+- [x] Postgres integration smoke automation refreshed (2026-04-25):
+  - [x] added script `apps/api/scripts/postgres-smoke.ts`
+  - [x] added command: `pnpm --filter @phantom-lab/api smoke:postgres`
+  - [x] script covers:
+    - [x] `auth -> chat -> message`
+    - [x] member forbidden checks (`roles`, `channel-notify/config` => `403`)
+    - [x] owner flow checks (`roles` list/create + `channel-notify/config` + `channel-notify/test`)
+  - [x] quickstart doc updated (`docs/POSTGRES_QUICKSTART.md`)
+- [x] CI target for Postgres smoke added (2026-04-25):
+  - [x] workflow added: `.github/workflows/postgres-smoke.yml`
+  - [x] disposable Postgres service in GitHub Actions (`postgres:16-alpine` + healthcheck)
+  - [x] pipeline steps: `pnpm install --frozen-lockfile` -> `prisma:generate` -> `prisma:migrate:deploy` -> `pnpm smoke:postgres`
+- [x] Temp rooms API baseline delivered (2026-04-25):
+  - [x] endpoint added: `POST /v1/chats/:chatId/temp-rooms`
+  - [x] RBAC check added: `room.temp.create`
+  - [x] payload guardrails: ISO datetime validation + range checks (`starts_at` / `ends_at`)
+  - [x] audit trail added: `room.temp.create`
+  - [x] storage parity delivered (`inmemory` + `postgres`, Prisma model `TempRoom`)
+  - [x] Prisma schema + migration applied:
+    - [x] `20260425113000_phase2_temp_rooms`
+  - [x] validation:
+    - [x] `pnpm --filter @phantom-lab/api build`
+    - [x] `pnpm --filter @phantom-lab/api test` (`91/91`)
+- [x] Reputation baseline delivered (2026-04-25):
+  - [x] endpoint added: `POST /v1/chats/:chatId/reputation/adjust`
+  - [x] RBAC check added: `reputation.adjust`
+  - [x] audit trail added: `reputation.adjust`
+  - [x] realtime event added: `reputation.updated`
+  - [x] storage parity delivered (`inmemory` + `postgres`, Prisma model `ReputationEvent`)
+  - [x] Prisma schema + migration applied:
+    - [x] `20260425121500_phase2_reputation`
+  - [x] validation:
+    - [x] `pnpm --filter @phantom-lab/api build`
+    - [x] `pnpm --filter @phantom-lab/api test` (`94/94`)
+- [x] Member tags baseline delivered (2026-04-25):
+  - [x] endpoint added: `POST /v1/chats/:chatId/members/:userId/tags`
+  - [x] RBAC checks added: `member.tag.assign` (+ `member.tag.create` for first tag in chat)
+  - [x] idempotent assign flow for already assigned tags
+  - [x] audit trail added: `member.tag.create|member.tag.assign`
+  - [x] storage parity delivered (`inmemory` + `postgres`, Prisma model `MemberTag`)
+  - [x] Prisma schema + migration applied:
+    - [x] `20260425130000_phase2_member_tags`
+  - [x] validation:
+    - [x] `pnpm --filter @phantom-lab/api build`
+    - [x] `pnpm --filter @phantom-lab/api test` (`98/98`)
+- [x] Temp room lifecycle endpoints delivered (2026-04-25):
+  - [x] endpoints added:
+    - [x] `POST /v1/chats/:chatId/temp-rooms/:tempRoomId/archive`
+    - [x] `POST /v1/chats/:chatId/temp-rooms/:tempRoomId/restore`
+  - [x] RBAC checks added: `room.temp.archive|room.temp.restore`
+  - [x] idempotent state transitions for already-archived/already-active rooms
+  - [x] audit trail added: `room.temp.archive|room.temp.restore`
+  - [x] storage parity delivered (`inmemory` + `postgres`) via `getTempRoom/updateTempRoom`
+  - [x] validation:
+    - [x] `pnpm --filter @phantom-lab/api build`
+    - [x] `pnpm --filter @phantom-lab/api test` (`100/100`)
+- [x] Temp room read-only archive export flow delivered (2026-04-25):
+  - [x] endpoint added: `GET /v1/chats/:chatId/temp-rooms/:tempRoomId/export/history`
+  - [x] export allowed only for `archived` temp rooms
+  - [x] export window constrained to temp room archive context (`startsAt/createdAt` -> `endsAt/archivedAt/updatedAt`)
+  - [x] dedicated audit action: `history.export.temp_room`
+  - [x] validation:
+    - [x] `pnpm --filter @phantom-lab/api build`
+    - [x] `pnpm --filter @phantom-lab/api test` (`103/103`)
+- [x] Member profile fields baseline delivered (2026-04-26):
+  - [x] endpoints added:
+    - [x] `GET /v1/chats/:chatId/members/:userId/profile-fields`
+    - [x] `POST /v1/chats/:chatId/members/:userId/profile-fields`
+    - [x] `DELETE /v1/chats/:chatId/members/:userId/profile-fields/:fieldKey`
+  - [x] RBAC check added: `member.profile_fields.manage`
+  - [x] normalized key/value + idempotent upsert/delete behavior
+  - [x] audit trail added: `member.profile_field.upsert|member.profile_field.delete`
+  - [x] storage parity delivered (`inmemory` + `postgres`, Prisma model `MemberProfileField`)
+  - [x] Prisma schema + migration applied:
+    - [x] `20260426091000_phase2_member_profile_fields`
+  - [x] validation:
+    - [x] `pnpm --filter @phantom-lab/api prisma:generate`
+    - [x] `pnpm --filter @phantom-lab/api build`
+    - [x] `pnpm --filter @phantom-lab/api test` (`106/106`)
+- [x] Translation cached baseline delivered (2026-04-26):
+  - [x] endpoints added:
+    - [x] `POST /v1/chats/:chatId/messages/:messageId/translate`
+    - [x] `GET /v1/chats/:chatId/messages/:messageId/translations`
+    - [x] `DELETE /v1/chats/:chatId/messages/:messageId/translations/:targetLanguage`
+  - [x] RBAC checks added: `translation.use|translation.manage`
+  - [x] cache behavior: per-message/per-language upsert with TTL freshness check (`TRANSLATION_CACHE_TTL_SECONDS`)
+  - [x] deterministic baseline provider (`TRANSLATION_PROVIDER=mock-local` by default)
+  - [x] audit trail added: `message.translate|message.translation.delete`
+  - [x] storage parity delivered (`inmemory` + `postgres`, Prisma model `MessageTranslation`)
+  - [x] Prisma schema + migration applied:
+    - [x] `20260426100000_phase2_message_translations`
+  - [x] validation:
+    - [x] `pnpm --filter @phantom-lab/api prisma:generate`
+    - [x] `pnpm --filter @phantom-lab/api build`
+    - [x] `pnpm --filter @phantom-lab/api test` (`110/110`)
+- [x] Auto-lifecycle workers delivered (2026-04-26):
+  - [x] Temp room auto-archive baseline:
+    - [x] process-local sweep worker in `TempRoomsModule` with startup recovery + periodic scan
+    - [x] due detection by `endsAt <= now` for active rooms
+    - [x] automatic transition `active -> archived` with `archivedAt`
+    - [x] audit action added: `room.temp.archive.auto`
+    - [x] storage parity methods added (`inmemory` + `postgres`): `listDueTempRoomsForAutoArchive`
+  - [x] Incident mode auto-rollback baseline:
+    - [x] process-local sweep worker in `IncidentModeModule` with startup recovery + periodic scan
+    - [x] threshold-based rollback by `INCIDENT_MODE_AUTO_ROLLBACK_MINUTES`
+    - [x] automatic transition `enabled -> disabled` for expired active incidents
+    - [x] audit action added: `incident_mode.auto_rollback`
+    - [x] WS event emitted on auto-rollback: `incident_mode.changed`
+    - [x] storage parity methods added (`inmemory` + `postgres`): `listActiveIncidentModes`
+  - [x] validation:
+    - [x] `pnpm --filter @phantom-lab/api build`
+    - [x] `pnpm --filter @phantom-lab/api test` (`112/112`)
+- [x] Tickets SLA worker + metrics baseline delivered (2026-04-26):
+  - [x] endpoint added:
+    - [x] `GET /v1/chats/:chatId/tickets/sla/stats`
+  - [x] RBAC permission integrated:
+    - [x] `ticket.sla.manage` added to admin baseline
+    - [x] SLA set/update operations require `ticket.sla.manage`
+  - [x] ticket model extended with SLA breach marker:
+    - [x] `slaBreachedAt` persisted (`inmemory` + `postgres`)
+  - [x] process-local SLA sweeper worker in `TicketsModule`:
+    - [x] startup recovery + periodic scan
+    - [x] auto-mark overdue tickets (`ticket.sla.overdue`) with `ticket.updated` fanout
+  - [x] storage parity delivered (`inmemory` + `postgres`) for due-scan operations:
+    - [x] `listTicketsPendingSlaBreach(nowIso)`
+  - [x] Prisma schema + migration applied:
+    - [x] `20260426113000_phase2_ticket_sla_worker`
+  - [x] validation:
+    - [x] `pnpm --filter @phantom-lab/api prisma:generate`
+    - [x] `pnpm --filter @phantom-lab/api build`
+    - [x] `pnpm --filter @phantom-lab/api test` (`115/115`)
+- [x] Automation runtime executor baseline delivered (2026-04-26):
+  - [x] endpoints added:
+    - [x] `POST /v1/chats/:chatId/automation/rules/:ruleId/execute`
+    - [x] `GET /v1/chats/:chatId/automation/rules/:ruleId/executions`
+  - [x] execution authorization:
+    - [x] `automation.rule.execute` required for run/list
+  - [x] runtime behavior:
+    - [x] conditions evaluation on payload (basic operators: `eq|neq|gt|gte|lt|lte|in|contains`)
+    - [x] execution statuses baseline: `success|failed|skipped` (`dry_run` and `conditions_not_met` -> `skipped`)
+    - [x] audit trail for manual runs: `automation.rule.execute`
+    - [x] realtime event added: `automation.rule.executed`
+  - [x] execution log storage parity delivered (`inmemory` + `postgres`):
+    - [x] new entity/model: `AutomationExecution`
+    - [x] DB contract methods: `createAutomationExecution`, `listAutomationExecutions`
+  - [x] Prisma schema + migration applied:
+    - [x] `20260426123000_phase2_automation_executions`
+  - [x] validation:
+    - [x] `pnpm --filter @phantom-lab/api prisma:generate`
+    - [x] `pnpm --filter @phantom-lab/api build`
+    - [x] `pnpm --filter @phantom-lab/api test` (`117/117`)
+- [x] Join approval + invites baseline delivered (2026-04-26):
+  - [x] endpoints added:
+    - [x] `GET /v1/chats/:chatId/invites`
+    - [x] `POST /v1/chats/:chatId/invites`
+    - [x] `POST /v1/chats/:chatId/invites/:inviteId/revoke`
+    - [x] `POST /v1/chats/:chatId/invites/use`
+    - [x] `GET /v1/chats/:chatId/join-requests`
+    - [x] `POST /v1/chats/:chatId/join-requests`
+    - [x] `POST /v1/chats/:chatId/join-requests/:requestId/approve`
+    - [x] `POST /v1/chats/:chatId/join-requests/:requestId/reject`
+  - [x] RBAC checks integrated:
+    - [x] `chat.invite.create|chat.invite.revoke|chat.invite.use_unlimited`
+    - [x] `member.approve_join|member.reject_join`
+  - [x] runtime behavior:
+    - [x] pending queue with idempotent join-request creation
+    - [x] invite validation guards (`revoked/expired/maxUses`)
+    - [x] approve flow activates/creates member and emits `member.updated`
+    - [x] audit trail for invite + join-review actions
+  - [x] storage parity delivered (`inmemory` + `postgres`) for:
+    - [x] `Invite`
+    - [x] `JoinRequest`
+  - [x] Prisma schema + migration applied:
+    - [x] `20260426133000_phase2_invites_join_requests`
+  - [x] validation:
+    - [x] `pnpm --filter @phantom-lab/api prisma:generate`
+    - [x] `pnpm --filter @phantom-lab/api build`
+    - [x] `pnpm --filter @phantom-lab/api test` (`121/121`)
+- [x] Join policy hardening delivered (2026-04-26):
+  - [x] per-invite role and approval policy:
+    - [x] invite model extended with `approvalMode` (`auto|manual`) and `targetRoleId`
+    - [x] `POST /v1/chats/:chatId/invites` accepts `approval_mode` + `target_role_id`
+    - [x] server-side role safety on invite create/approve (`assertCanManageRole`)
+  - [x] auto/manual approval runtime:
+    - [x] `invites/use` auto-approves immediately for `approval_mode=auto`
+    - [x] `join-requests` supports global fallback policy (`JOIN_APPROVAL_DEFAULT_MODE`)
+    - [x] auto-approve creates approved join request record + member activation + role assignment + `member.updated`
+  - [x] storage parity delivered (`inmemory` + `postgres`) with enum/fields:
+    - [x] Prisma enum/model extension: `JoinApprovalMode`, `Invite.approvalMode`, `Invite.targetRoleId`
+    - [x] migration applied: `20260426143000_phase2_invite_auto_approve_role`
+  - [x] tests:
+    - [x] auto-approve invite flow + target role assignment
+    - [x] global auto policy for direct join requests
+  - [x] validation:
+    - [x] `pnpm --filter @phantom-lab/api prisma:generate`
+    - [x] `pnpm --filter @phantom-lab/api build`
+    - [x] `pnpm --filter @phantom-lab/api test` (`123/123`)
+- [x] Join policy config endpoints + invite patch delivered (2026-04-26):
+  - [x] endpoints added:
+    - [x] `PATCH /v1/chats/:chatId/invites/:inviteId`
+    - [x] `GET /v1/chats/:chatId/join-policy`
+    - [x] `PATCH /v1/chats/:chatId/join-policy`
+  - [x] runtime behavior:
+    - [x] per-chat stored join policy (`default_approval_mode`, `default_target_role_id`)
+    - [x] env fallback preserved when chat policy is absent (`JOIN_APPROVAL_DEFAULT_MODE`)
+    - [x] invite patch validation (`max_uses >= uses_count`, role hierarchy guard)
+    - [x] approve/auto-approve path can use chat default target role
+  - [x] storage parity delivered (`inmemory` + `postgres`):
+    - [x] new entity/model: `JoinPolicy`
+    - [x] DB contract methods: `getJoinPolicy`, `upsertJoinPolicy`
+  - [x] Prisma schema + migration applied:
+    - [x] `20260426152000_phase2_join_policy_config`
+  - [x] tests:
+    - [x] chat-policy override over env fallback
+    - [x] invite update policy validation path
+  - [x] validation:
+    - [x] `pnpm --filter @phantom-lab/api prisma:generate`
+    - [x] `pnpm --filter @phantom-lab/api build`
+    - [x] `pnpm --filter @phantom-lab/api test` (`125/125`)
+- [x] Invite code rotation + permission simulation helper delivered (2026-04-26):
+  - [x] endpoints added:
+    - [x] `POST /v1/chats/:chatId/invites/:inviteId/rotate-code`
+    - [x] `POST /v1/chats/:chatId/roles/permissions/simulate`
+  - [x] runtime behavior:
+    - [x] invite code regeneration with uniqueness checks and revoked-invite guard
+    - [x] optional custom invite code rotation with collision protection
+    - [x] simulation helper for actor-target checks (`permissions`, `manage_member`, `manage_role`, join-policy-relevant checks)
+    - [x] audit trail for `chat.invite.rotate_code` and `permission.simulate`
+  - [x] storage parity:
+    - [x] invite patch supports `code` updates (`inmemory` + `postgres`)
+  - [x] tests:
+    - [x] invite code rotation + duplicate/revoked guards
+    - [x] permission simulation success + forbidden-without-audit-view
+  - [x] validation:
+    - [x] `pnpm --filter @phantom-lab/api build`
+    - [x] `pnpm --filter @phantom-lab/api test` (`128/128`)
+- [x] Final backend hardening pass delivered (2026-04-27):
+  - [x] added focused hardening smoke runner:
+    - [x] script: `apps/api/scripts/hardening-smoke.ts`
+    - [x] command: `pnpm --filter @phantom-lab/api smoke:hardening`
+  - [x] scenario coverage:
+    - [x] RBAC regression checks (`member` denies + owner elevated flows)
+    - [x] moderation regression (`mute -> blocked send -> unmute -> send`)
+    - [x] incident mode toggle regression (`enable -> disable`)
+    - [x] scheduled message reliability (`scheduled -> sent`)
+    - [x] multi-user load burst + message count verification
+  - [x] docs updated:
+    - [x] `README.md` (`Smoke Scripts` section)
+    - [x] `docs/POSTGRES_QUICKSTART.md` (`hardening smoke` section)
+  - [x] validation:
+    - [x] `pnpm --filter @phantom-lab/api build`
+    - [x] `pnpm --filter @phantom-lab/api test` (`153/153`)
+    - [x] `pnpm --filter @phantom-lab/api smoke:hardening`
+- [x] Frontend integration handoff pack delivered (2026-04-27):
+  - [x] published integration handoff doc:
+    - [x] `docs/FRONTEND_INTEGRATION_HANDOFF.md`
+  - [x] includes:
+    - [x] API consumption checklist (P0/P1/P2)
+    - [x] WS contract quick reference
+    - [x] error-handling guardrails for Mini App UX
+    - [x] prioritized E2E matrix (`P0/P1/P2`)
+    - [x] release smoke gate commands for frontend rollout
+- [x] E2E ciphertext transport + key-bundle API baseline delivered (2026-04-27):
+  - [x] message model/storage extended for ciphertext envelope:
+    - [x] `Message.isEncrypted`
+    - [x] `Message.encryptedPayload`
+  - [x] device key-bundle storage delivered (`inmemory` + `postgres`):
+    - [x] new entity/model: `E2EDevice`
+    - [x] DB contract methods: `upsertE2EDevice`, `listE2EDevices`, `listE2EDevicesForUser`, `deactivateE2EDevice`
+  - [x] E2E device management API added:
+    - [x] `POST /v1/chats/:chatId/e2e/devices`
+    - [x] `GET /v1/chats/:chatId/e2e/devices/me`
+    - [x] `GET /v1/chats/:chatId/e2e/devices?user_ids=...`
+    - [x] `POST /v1/chats/:chatId/e2e/devices/:deviceId/deactivate`
+    - [x] RBAC permissions: `e2e.device.register`, `e2e.device.view`
+  - [x] message send-path hardening for E2E mode:
+    - [x] `CreateMessageDto` supports `encrypted_payload`
+    - [x] server accepts `text/media` OR `encrypted_payload` (mutually exclusive)
+    - [x] encrypted message edits rejected on server (`PATCH` blocked)
+    - [x] anti-abuse plaintext inspections skipped for encrypted payloads (server cannot decrypt)
+  - [x] performance optimizations on send/limit path:
+    - [x] author-scoped queries added (`listMessagesByAuthorSince`, `getLastMessageByAuthor`)
+    - [x] duplicate/flood and role-limit checks switched from full-chat scan to author-only history
+    - [x] index added: `Message(chatId, authorId, createdAt)`
+  - [x] Prisma/migration updates:
+    - [x] migration: `20260427100000_phase3_e2e_encryption`
+    - [x] SQL alignment for prekeys (`oneTimePreKeys NOT NULL DEFAULT []`)
+  - [x] validation:
+    - [x] `pnpm --filter @phantom-lab/api prisma:generate`
+    - [x] `pnpm --filter @phantom-lab/api build`
+    - [x] `pnpm --filter @phantom-lab/api test` (`133/133`)
+    - [x] `pnpm --filter @phantom-lab/api smoke:hardening`
+- [x] Security + encryption + network hardening pass delivered (2026-04-27):
+  - [x] E2E message hardening:
+    - [x] encrypted payload algorithm allowlist (`E2E_ALLOWED_MESSAGE_ALGORITHMS`)
+    - [x] base64/base64url guardrails for ciphertext/nonce/aad fields
+    - [x] encrypted replay/duplicate protection (fingerprint checks in duplicate window)
+  - [x] E2E device-bundle hardening:
+    - [x] algorithm allowlist (`E2E_ALLOWED_DEVICE_ALGORITHMS`)
+    - [x] base64/base64url validation for identity/signed/fallback/prekeys
+    - [x] dedup + min/max one-time prekeys (`E2E_MIN_ONE_TIME_PREKEYS`, `E2E_MAX_ONE_TIME_PREKEYS`)
+  - [x] network/load optimizations:
+    - [x] message pagination support `GET /v1/chats/:chatId/messages?before=<iso>&limit=<n>`
+    - [x] websocket join snapshot now bounded by `WS_JOIN_SNAPSHOT_LIMIT` (default `200`)
+  - [x] websocket perimeter hardening:
+    - [x] configurable WS CORS origins (`WS_CORS_ORIGINS`)
+    - [x] max WS payload guard (`WS_MAX_HTTP_BUFFER_SIZE`)
+  - [x] validation:
+    - [x] `pnpm --filter @phantom-lab/api build`
+    - [x] `pnpm --filter @phantom-lab/api test` (`133/133`)
+    - [x] `pnpm --filter @phantom-lab/api smoke:hardening`
+- [x] Security reinforcement pass delivered (2026-04-27):
+  - [x] JWT config hardening:
+    - [x] normalized strict string parsing for `JWT_ISSUER` / `JWT_AUDIENCE`
+    - [x] sign-time crash fix for non-string issuer/audience values in runtime config
+  - [x] token abuse resistance:
+    - [x] max token-length guard for HTTP bearer + websocket token (`JWT_MAX_TOKEN_CHARS`)
+    - [x] refresh-token misuse reject preserved on HTTP/WS auth path
+  - [x] websocket perimeter hardening:
+    - [x] per-user/per-event in-memory rate limit knobs (`WS_RATE_LIMIT_*`)
+  - [x] API input hardening:
+    - [x] strict DTO validation (`forbidNonWhitelisted`, `forbidUnknownValues`)
+    - [x] body-size control (`API_BODY_LIMIT_BYTES`) and security headers (`ENABLE_HSTS` + baseline headers)
+  - [x] auth endpoint abuse control:
+    - [x] IP sliding-window guard on `POST /v1/auth/telegram` (`AUTH_RATE_LIMIT_*`)
+  - [x] validation:
+    - [x] `pnpm --filter @phantom-lab/api build`
+    - [x] `pnpm --filter @phantom-lab/api test` (`142/142`)
+    - [x] `pnpm --filter @phantom-lab/api smoke:hardening`
+- [x] Security reinforcement pass II delivered (2026-04-27):
+  - [x] auth/session hardening:
+    - [x] endpoint added: `POST /v1/auth/refresh`
+    - [x] refresh token rotation enabled (single-use refresh token semantics)
+    - [x] refresh replay protection cache with cleanup/fallback TTL env tuning
+  - [x] JWT claim/algorithm hardening:
+    - [x] explicit access token type claim (`type=access`) on issue path
+    - [x] strict token type check for HTTP/WS auth (`access` only)
+    - [x] algorithm allowlist applied to JWT verify/sign (`JWT_ALLOWED_ALGORITHMS`, HMAC-only)
+  - [x] auth input hardening:
+    - [x] tighter DTO validation for `initData`, `chatId`, and refresh payload
+  - [x] validation:
+    - [x] `pnpm --filter @phantom-lab/api build`
+    - [x] `pnpm --filter @phantom-lab/api test` (`150/150`)
+    - [x] `pnpm --filter @phantom-lab/api smoke:hardening`
+- [x] Security reinforcement pass III delivered (2026-04-27):
+  - [x] replay-protection store hardening:
+    - [x] unified replay store service extracted (`AuthReplayStoreService`)
+    - [x] optional distributed mode via Redis (`AUTH_REPLAY_STORE_DRIVER=auto|memory|redis`)
+    - [x] hashed replay keys before storage (SHA-256) to minimize metadata exposure in cache backend
+    - [x] legacy cleanup env compatibility preserved (`TELEGRAM_INITDATA_REPLAY_CLEANUP_INTERVAL_SECONDS`, `JWT_REFRESH_REPLAY_CLEANUP_INTERVAL_SECONDS`)
+  - [x] auth replay protections migrated to shared store:
+    - [x] Telegram initData replay checks now use shared replay store
+    - [x] refresh-token replay checks now use shared replay store
+  - [x] tests:
+    - [x] `AuthService` fixture aligned with replay-store dependency
+    - [x] new replay-store unit coverage for single-use semantics, TTL reuse, cleanup env fallback/precedence
+  - [x] validation:
+    - [x] `pnpm --filter @phantom-lab/api build`
+    - [x] `pnpm --filter @phantom-lab/api test` (`153/153`)
+    - [x] `pnpm --filter @phantom-lab/api smoke:hardening`
+- [x] Backend polish + load stability pass delivered (2026-04-27):
+  - [x] hot-path optimization in messaging:
+    - [x] anti-abuse policy parsing moved to startup-time cache (keywords/regex/domain/media rules, duplicate/flood limits)
+    - [x] role-limit checks optimized to single-pass counters (hour/day/media/links/mentions/burst) to reduce per-message CPU
+  - [x] message retrieval efficiency:
+    - [x] DB contract extended with paged `listMessages` options (`before`, `limit`)
+    - [x] `ChatService.listMessages` now delegates pagination/filtering to DB adapter instead of service-side full scan
+    - [x] Prisma adapter uses bounded query (`take` + indexed filters) for paged fetch path
+  - [x] runtime memory safety:
+    - [x] auth rate-limit guard now has bucket-cap eviction (`AUTH_RATE_LIMIT_MAX_BUCKETS`)
+    - [x] websocket rate-limiter now has bucket-cap eviction (`WS_RATE_LIMIT_MAX_BUCKETS`)
+    - [x] websocket gateway detaches event-bus listeners on module destroy
+  - [x] validation:
+    - [x] `pnpm --filter @phantom-lab/api build`
+    - [x] `pnpm --filter @phantom-lab/api test` (`155/155`)
+    - [x] `pnpm --filter @phantom-lab/api smoke:hardening`
+- [x] Backend polish + load stability pass II delivered (2026-04-27):
+  - [x] replay-store resilience under sustained auth load:
+    - [x] memory replay-store key-cap added (`AUTH_REPLAY_MEMORY_MAX_KEYS`) with bounded eviction path
+    - [x] unit coverage added for overflow eviction behavior
+  - [x] anti-abuse path micro-optimizations:
+    - [x] duplicate/flood checks switched to ISO timestamp boundary comparisons (reduced `Date.parse` usage in hot loop)
+    - [x] early-exit on flood/duplicate threshold hits to reduce scan cost under spam bursts
+  - [x] role-limit path micro-optimizations:
+    - [x] hour/burst window checks switched to ISO boundary comparisons in per-message counters
+  - [x] auth guard hardening:
+    - [x] rate-limit IP key normalization + bounded key length to avoid oversized header key abuse
+  - [x] validation:
+    - [x] `pnpm --filter @phantom-lab/api build`
+    - [x] `pnpm --filter @phantom-lab/api test` (`155/155`)
+    - [x] `pnpm --filter @phantom-lab/api smoke:hardening`
+- [x] Backend polish + load stability pass III delivered (2026-04-27):
+  - [x] autosanction hot-path optimization:
+    - [x] DB contract extended with aggregated audit counter (`countAudit`)
+    - [x] `ChatService.applyAutoSanction` switched from full `listAudit` scan to filtered DB-side count query
+  - [x] role-limit load optimization:
+    - [x] dynamic history window for per-user history fetch (hour/day/burst max window instead of unconditional 24h path)
+    - [x] removed fallback extra burst query by reusing bounded history set
+    - [x] conditional counters for media/links/mentions/day/hour to avoid unnecessary work in hot loop
+  - [x] message-search micro-optimization:
+    - [x] switched `searchMessages` date filtering to ISO boundary comparisons (removed per-message `Date.parse`)
+  - [x] validation:
+    - [x] `pnpm --filter @phantom-lab/api build`
+    - [x] `pnpm --filter @phantom-lab/api test` (`156/156`)
+    - [x] `pnpm --filter @phantom-lab/api smoke:hardening`
+- [x] Frontend readiness backend pack delivered (2026-04-27):
+  - [x] frontend bootstrap contract:
+    - [x] endpoint added: `GET /v1/chats/:chatId/bootstrap?messages_limit=<1..500>`
+    - [x] response includes `chat`, `messages`, `identities`, `pagination.before`, `ws.namespace`, `serverTime`
+  - [x] browser integration hardening:
+    - [x] HTTP CORS controls added (`API_CORS_ORIGINS`, `API_CORS_CREDENTIALS`)
+    - [x] cross-origin resource policy made configurable (`API_CROSS_ORIGIN_RESOURCE_POLICY`)
+  - [x] frontend P0 regression smoke:
+    - [x] script added: `pnpm --filter @phantom-lab/api smoke:frontend-p0`
+    - [x] validates P0 matrix for HTTP+WS (`auth/bootstrap/join/send/edit/delete/reactions/mute+unmute/scheduled/typing`)
+  - [x] docs updated:
+    - [x] `README.md`
+    - [x] `docs/POSTGRES_QUICKSTART.md`
+    - [x] `docs/FRONTEND_INTEGRATION_HANDOFF.md`
+  - [x] validation:
+    - [x] `pnpm --filter @phantom-lab/api build`
+    - [x] `pnpm --filter @phantom-lab/api test`
+    - [x] `pnpm --filter @phantom-lab/api smoke:hardening`
+    - [x] `pnpm --filter @phantom-lab/api smoke:frontend-p0`
+- [x] Frontend implementation kickoff delivered (2026-04-27):
+  - [x] created `apps/web` (Next.js App Router + TypeScript) for Mini App client
+  - [x] P0 client wiring delivered:
+    - [x] Telegram/dev auth bootstrap (`POST /v1/auth/telegram`)
+    - [x] initial chat bootstrap (`GET /v1/chats/:chatId/bootstrap`)
+    - [x] realtime WS wiring (`/ws`, `chat.join`, `message.*`, `typing.*`, `message.reaction.updated`)
+    - [x] composer with optimistic send + edit/delete/reactions
+  - [x] frontend runtime configuration + docs:
+    - [x] `apps/web/.env.example`
+    - [x] root scripts added: `dev:web`, `build:web`
+    - [x] `README.md` frontend run section updated
+    - [x] `docs/FRONTEND_QUICKSTART.md`
+  - [x] validation:
+    - [x] `pnpm --filter @phantom-lab/web build`
+    - [x] `pnpm --filter @phantom-lab/api test` (`157/157`)
+    - [x] `pnpm --filter @phantom-lab/api smoke:frontend-p0`
+
+## In Progress
+- [x] Validation pass and local run verification (`pnpm build`, API boot smoke-check via `GET /v1/health` = 200).
+- [x] E2E smoke (dev auth mode): `auth -> get chat -> send message`.
+- [x] Permission smoke: member blocked from `channel-notify` config (expected HTTP 403).
+- [x] Post-refactor smoke in `inmemory` mode after async + adapter migration.
+- [x] Phase 2 next slice definition (keyword alerts, read receipts/privacy, reminders/drafts hardening).
+
+## Blockers
+- [x] No active blockers.
+
+## Next
+- [x] Final backend hardening pass: focused E2E/regression scenarios + load/reliability smoke for handoff to frontend integration.
+- [x] Frontend integration handoff: publish API consumption checklist + prioritized E2E matrix for Mini App client wiring.
+- [x] Frontend implementation kickoff: wire P0 flows (auth/bootstrap/send/edit/delete/reactions/typing) and run E2E-P0 matrix.
