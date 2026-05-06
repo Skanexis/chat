@@ -34,6 +34,8 @@ export type ChatMessage = {
   actorUserId: string;
   displayAuthorType: "user" | "group" | "role_profile";
   displayAuthorId: string;
+  displayAuthorName?: string;
+  displayAuthorUsername?: string;
   senderMode: "as_user" | "as_group" | "as_role_profile";
   text?: string;
   media?: {

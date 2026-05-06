@@ -1,10 +1,5 @@
-import { redirect } from "next/navigation";
+import { AdminHubSection } from "@/components/chat/route-sections";
 
-export default async function AdminIndexPage({
-  params
-}: Readonly<{
-  params: Promise<{ chatId: string }>;
-}>) {
-  const { chatId } = await params;
-  redirect(`/chat/${encodeURIComponent(chatId)}/admin/roles`);
+export default function AdminIndexPage() {
+  return <AdminHubSection />;
 }

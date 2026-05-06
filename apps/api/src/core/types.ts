@@ -139,6 +139,8 @@ export interface Message {
   actorUserId: string;
   displayAuthorType: DisplayAuthorType;
   displayAuthorId: string;
+  displayAuthorName?: string;
+  displayAuthorUsername?: string;
   senderMode: SenderMode;
   text?: string;
   media?: {

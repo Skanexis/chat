@@ -33,32 +33,45 @@ export function ChatAppShell({ children }: ChatAppShellProps) {
     `${rootPath}/read-receipts`,
     `${rootPath}/thread-subscriptions`,
     `${rootPath}/polls`,
-    `${rootPath}/reputation`
+    `${rootPath}/reputation`,
+    `${rootPath}/knowledge`,
+    `${rootPath}/translations`,
+    `${rootPath}/e2e-devices`
   ]);
-  const navItems = [
-    { label: "Chat", href: rootPath }
-  ];
+  const mainNavItems = [{ label: "Chat", href: rootPath }];
+  const workspaceNavItems: Array<{ label: string; href: string }> = [];
+  const adminNavItems: Array<{ label: string; href: string }> = [];
 
   if (runtime.isModerator) {
-    navItems.push({ label: "Search", href: `${rootPath}/search` });
-    navItems.push({ label: "Pinned", href: `${rootPath}/pinned` });
-    navItems.push({ label: "Drafts", href: `${rootPath}/drafts` });
-    navItems.push({ label: "Bookmarks", href: `${rootPath}/bookmarks` });
-    navItems.push({ label: "Reminders", href: `${rootPath}/reminders` });
-    navItems.push({ label: "Receipts", href: `${rootPath}/read-receipts` });
-    navItems.push({ label: "Threads", href: `${rootPath}/thread-subscriptions` });
-    navItems.push({ label: "Polls", href: `${rootPath}/polls` });
-    navItems.push({ label: "Knowledge", href: `${rootPath}/knowledge` });
-    navItems.push({ label: "Translate", href: `${rootPath}/translations` });
-    navItems.push({ label: "E2E", href: `${rootPath}/e2e-devices` });
-    navItems.push({ label: "Reputation", href: `${rootPath}/reputation` });
-    navItems.push({ label: "Members", href: `${rootPath}/admin/members` });
-    navItems.push({ label: "TempRooms", href: `${rootPath}/admin/temp-rooms` });
+    workspaceNavItems.push({ label: "Search", href: `${rootPath}/search` });
+    workspaceNavItems.push({ label: "Pinned", href: `${rootPath}/pinned` });
+    workspaceNavItems.push({ label: "Drafts", href: `${rootPath}/drafts` });
+    workspaceNavItems.push({ label: "Bookmarks", href: `${rootPath}/bookmarks` });
+    workspaceNavItems.push({ label: "Reminders", href: `${rootPath}/reminders` });
+    workspaceNavItems.push({ label: "Receipts", href: `${rootPath}/read-receipts` });
+    workspaceNavItems.push({ label: "Threads", href: `${rootPath}/thread-subscriptions` });
+    workspaceNavItems.push({ label: "Polls", href: `${rootPath}/polls` });
+    workspaceNavItems.push({ label: "Reputation", href: `${rootPath}/reputation` });
   }
+
+  if (runtime.isModerator) {
+    adminNavItems.push({ label: "Admin Hub", href: `${rootPath}/admin` });
+    adminNavItems.push({ label: "Members", href: `${rootPath}/admin/members` });
+    adminNavItems.push({ label: "Member Meta", href: `${rootPath}/admin/member-meta` });
+    adminNavItems.push({ label: "Temp Rooms", href: `${rootPath}/admin/temp-rooms` });
+    adminNavItems.push({ label: "Tickets", href: `${rootPath}/admin/tickets` });
+  }
+
   if (runtime.isAdmin) {
-    navItems.push({ label: "Roles", href: `${rootPath}/admin/roles` });
-    navItems.push({ label: "Notify", href: `${rootPath}/admin/channel-notify` });
-    navItems.push({ label: "Incident", href: `${rootPath}/admin/incident` });
+    adminNavItems.push({ label: "Roles", href: `${rootPath}/admin/roles` });
+    adminNavItems.push({ label: "Limits", href: `${rootPath}/admin/limits` });
+    adminNavItems.push({ label: "Invites", href: `${rootPath}/admin/invites` });
+    adminNavItems.push({ label: "Notify", href: `${rootPath}/admin/channel-notify` });
+    adminNavItems.push({ label: "Broadcasts", href: `${rootPath}/admin/broadcasts` });
+    adminNavItems.push({ label: "Webhooks", href: `${rootPath}/admin/webhooks` });
+    adminNavItems.push({ label: "Automation", href: `${rootPath}/admin/automation` });
+    adminNavItems.push({ label: "Incident", href: `${rootPath}/admin/incident` });
+    adminNavItems.push({ label: "Audit", href: `${rootPath}/admin/audit` });
   }
 
   if (runtime.state === "initializing") {
@@ -105,10 +118,7 @@ export function ChatAppShell({ children }: ChatAppShellProps) {
     <section className="app-shell">
       <header className="app-topbar">
         <div>
-          <h1>{runtime.chat?.name ?? "Ristoranti Chat"}</h1>
-          <p>
-            chat_id: <code>{runtime.chatId}</code>
-          </p>
+          <h1>Ristoranti Chat</h1>
         </div>
         <div className="app-meta">
           <RolePill role={runtime.roleName} />
@@ -118,7 +128,7 @@ export function ChatAppShell({ children }: ChatAppShellProps) {
         </div>
       </header>
 
-      <main className="app-body">{children}</main>
+      <main className={cn("app-body", normalizedPathname === rootPath ? "app-body-chat" : undefined)}>{children}</main>
 
       {runtime.liveIncidentMode?.enabled ? (
         <SystemBanner
@@ -139,9 +149,9 @@ export function ChatAppShell({ children }: ChatAppShellProps) {
       ) : null}
 
       <footer className="app-footer">
-        <nav className="ds-bottom-tabs" aria-label="Chat sections">
-          {navItems.map((item) => {
-            const active = pathname === item.href;
+        <nav className="ds-bottom-tabs" aria-label="Main section">
+          {mainNavItems.map((item) => {
+            const active = normalizedPathname === item.href;
             return (
               <Link key={item.href} className={cn("ds-tab-btn", active ? "is-active" : undefined)} href={item.href}>
                 <span>{item.label}</span>
@@ -149,6 +159,30 @@ export function ChatAppShell({ children }: ChatAppShellProps) {
             );
           })}
         </nav>
+        {workspaceNavItems.length > 0 ? (
+          <nav className="ds-bottom-tabs ds-bottom-tabs-secondary" aria-label="Workspace sections">
+            {workspaceNavItems.map((item) => {
+              const active = normalizedPathname === item.href;
+              return (
+                <Link key={item.href} className={cn("ds-tab-btn", active ? "is-active" : undefined)} href={item.href}>
+                  <span>{item.label}</span>
+                </Link>
+              );
+            })}
+          </nav>
+        ) : null}
+        {adminNavItems.length > 0 ? (
+          <nav className="ds-bottom-tabs ds-bottom-tabs-admin" aria-label="Admin sections">
+            {adminNavItems.map((item) => {
+              const active = normalizedPathname === item.href;
+              return (
+                <Link key={item.href} className={cn("ds-tab-btn", active ? "is-active" : undefined)} href={item.href}>
+                  <span>{item.label}</span>
+                </Link>
+              );
+            })}
+          </nav>
+        ) : null}
       </footer>
     </section>
   );

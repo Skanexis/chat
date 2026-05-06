@@ -61,6 +61,7 @@ button {
 .app-shell {
   width: 100%;
   max-width: 480px;
+  height: calc(100dvh - 32px);
   min-height: calc(100dvh - 32px);
   background: linear-gradient(180deg, rgba(20, 20, 30, 0.95), rgba(10, 10, 15, 0.98));
   border: 1px solid var(--line);
@@ -106,6 +107,7 @@ button {
 
 .app-body {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
   display: flex;
@@ -117,6 +119,18 @@ button {
     url("https://www.transparenttextures.com/patterns/cubes.png");
 }
 
+.app-body-chat {
+  overflow: hidden;
+  padding-bottom: 0;
+}
+
+.chat-main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .chat-feed {
   padding: 12px;
   display: flex;
@@ -124,6 +138,38 @@ button {
   gap: 10px;
   overflow-y: auto;
   flex: 1;
+  min-height: 0;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.chat-scroll-actions {
+  display: flex;
+  justify-content: center;
+  padding: 6px 12px 0;
+}
+
+.chat-scroll-bottom-btn {
+  border: 1px solid rgba(167, 139, 250, 0.55);
+  background: rgba(76, 29, 149, 0.28);
+  color: #f1eaff;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    transform var(--speed-fast) var(--ease-standard),
+    background var(--speed-fast) var(--ease-standard),
+    border-color var(--speed-fast) var(--ease-standard);
+}
+
+.chat-scroll-bottom-btn:hover {
+  transform: translateY(-1px);
+  background: rgba(109, 40, 217, 0.3);
+  border-color: rgba(196, 181, 253, 0.8);
 }
 
 .app-footer {
@@ -175,6 +221,18 @@ button {
   padding: 10px 12px max(12px, env(safe-area-inset-bottom, 8px));
   overflow-x: auto;
   scrollbar-width: none;
+}
+
+.ds-bottom-tabs + .ds-bottom-tabs {
+  border-top: 1px solid var(--line);
+}
+
+.ds-bottom-tabs-secondary {
+  background: rgba(255, 255, 255, 0.01);
+}
+
+.ds-bottom-tabs-admin {
+  background: rgba(139, 92, 246, 0.08);
 }
 
 .ds-tab-btn {
@@ -433,6 +491,7 @@ button {
   display: flex;
   gap: 8px;
   align-items: flex-end;
+  animation: bubble-wrap-in var(--speed-slow) var(--ease-standard);
 }
 
 .ds-bubble-wrap.is-own {
@@ -444,7 +503,21 @@ button {
   border-radius: 16px;
   padding: 10px;
   border: 1px solid var(--line);
+  position: relative;
+  overflow: visible;
   animation: bubble-in var(--speed-slow) var(--ease-standard);
+  transition:
+    transform var(--speed-fast) var(--ease-standard),
+    box-shadow var(--speed-fast) var(--ease-standard),
+    border-color var(--speed-fast) var(--ease-standard);
+  cursor: pointer;
+}
+
+.ds-bubble-wrap.is-selected .ds-bubble {
+  border-color: rgba(167, 139, 250, 0.75);
+  box-shadow: 0 0 0 1px rgba(167, 139, 250, 0.28), 0 8px 26px rgba(76, 29, 149, 0.4);
+  transform: translateY(-1px) scale(1.01);
+  animation: bubble-selected-pop 220ms var(--ease-standard);
 }
 
 .ds-bubble-own {
@@ -487,6 +560,51 @@ button {
   gap: 6px;
 }
 
+.ds-reaction-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  animation: reaction-picker-in var(--speed-base) var(--ease-standard);
+}
+
+.ds-bubble-popover {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  z-index: 20;
+  border: 1px solid rgba(167, 139, 250, 0.45);
+  border-radius: 14px;
+  background: rgba(14, 14, 22, 0.96);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 14px 34px rgba(5, 6, 12, 0.55);
+  padding: 8px;
+  min-width: max-content;
+  animation: popover-rise 180ms var(--ease-standard);
+}
+
+.ds-bubble-wrap.is-own .ds-bubble-popover {
+  left: auto;
+  right: 0;
+}
+
+.ds-bubble-popover::after {
+  content: "";
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  left: 14px;
+  bottom: -6px;
+  transform: rotate(45deg);
+  background: rgba(14, 14, 22, 0.96);
+  border-right: 1px solid rgba(167, 139, 250, 0.45);
+  border-bottom: 1px solid rgba(167, 139, 250, 0.45);
+}
+
+.ds-bubble-wrap.is-own .ds-bubble-popover::after {
+  left: auto;
+  right: 14px;
+}
+
 .ds-bubble-foot {
   margin-top: 8px;
 }
@@ -496,19 +614,67 @@ button {
   background: rgba(31, 31, 43, 0.85);
   color: var(--text-muted);
   border-radius: 999px;
-  padding: 2px 9px;
+  padding: 4px 10px;
   font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
   cursor: pointer;
+  transition:
+    transform var(--speed-fast) var(--ease-standard),
+    border-color var(--speed-fast) var(--ease-standard),
+    color var(--speed-fast) var(--ease-standard),
+    background var(--speed-fast) var(--ease-standard);
 }
 
 .ds-action-row button:hover:enabled {
   border-color: var(--line-strong);
   color: #efe9ff;
+  transform: translateY(-1px);
+}
+
+.ds-action-row button:active:enabled {
+  transform: scale(0.97);
 }
 
 .ds-action-row button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.ds-reaction-btn {
+  border: 1px solid var(--line);
+  background: rgba(31, 31, 43, 0.92);
+  color: #f3edff;
+  border-radius: 999px;
+  min-width: 34px;
+  height: 30px;
+  font-size: 16px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition:
+    transform var(--speed-fast) var(--ease-standard),
+    border-color var(--speed-fast) var(--ease-standard),
+    background var(--speed-fast) var(--ease-standard);
+}
+
+.ds-reaction-btn:hover {
+  transform: translateY(-1px) scale(1.06);
+  border-color: var(--line-strong);
+}
+
+.ds-reaction-btn:active {
+  transform: scale(0.95);
+}
+
+.ds-reaction-btn.is-active {
+  border-color: rgba(167, 139, 250, 0.85);
+  background: rgba(124, 58, 237, 0.28);
+  transform: scale(1.08);
+  animation: reaction-active-pop 180ms var(--ease-standard);
 }
 
 .ds-reaction-pill {
@@ -518,6 +684,35 @@ button {
   border-radius: 999px;
   font-size: 11px;
   padding: 2px 8px;
+  cursor: pointer;
+  transition:
+    border-color var(--speed-fast) var(--ease-standard),
+    background var(--speed-fast) var(--ease-standard),
+    transform var(--speed-fast) var(--ease-standard);
+  animation: reaction-pill-in var(--speed-base) var(--ease-standard);
+}
+
+.ds-reaction-pill:hover {
+  border-color: var(--line-strong);
+  transform: translateY(-1px);
+}
+
+.ds-reaction-pill.is-active {
+  border-color: rgba(167, 139, 250, 0.85);
+  background: rgba(124, 58, 237, 0.32);
+}
+
+.ds-selected-tools {
+  animation: selected-tools-in var(--speed-base) var(--ease-standard);
+  transform-origin: left bottom;
+}
+
+.ds-bubble-wrap.is-own .ds-selected-tools {
+  transform-origin: right bottom;
+}
+
+.ds-popover-actions {
+  margin-top: 6px;
 }
 
 .ds-typing {
@@ -552,6 +747,7 @@ button {
   border-top: 1px solid var(--line);
   background: rgba(11, 11, 17, 0.92);
   padding: 12px;
+  flex-shrink: 0;
 }
 
 .ds-mode-switch {
@@ -587,8 +783,14 @@ button {
   background: rgba(22, 22, 30, 0.95);
   color: var(--text);
   padding: 10px 12px;
-  resize: vertical;
-  min-height: 74px;
+  resize: none;
+  min-height: 56px;
+  max-height: 33dvh;
+  font-size: 16px;
+  line-height: 1.45;
+  -webkit-text-size-adjust: 100%;
+  touch-action: manipulation;
+  overflow-y: auto;
 }
 
 .ds-composer-field textarea::placeholder {
@@ -647,9 +849,10 @@ button {
 
 .panel-toolbar {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   align-items: flex-end;
-  justify-content: space-between;
+  justify-content: flex-start;
   margin-bottom: 10px;
 }
 
@@ -753,6 +956,97 @@ button {
 
 .panel-chip button.danger {
   color: #ffb5b5;
+}
+
+.admin-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 8px 0 10px;
+}
+
+.admin-stat-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(20, 20, 30, 0.9);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.admin-stat-card strong {
+  font-size: 18px;
+  line-height: 1;
+  color: #efe8ff;
+}
+
+.admin-stat-card span {
+  font-size: 11px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.permission-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.permission-group-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(20, 20, 30, 0.82);
+  padding: 10px;
+}
+
+.permission-group-card header {
+  margin-bottom: 8px;
+}
+
+.permission-group-card header strong {
+  color: #e7dbff;
+  font-size: 12px;
+}
+
+.permission-check-list {
+  display: grid;
+  gap: 6px;
+}
+
+.panel-inline-check {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+}
+
+.panel-inline-check input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+}
+
+.panel-inline-check span {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.panel-inline-form {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.panel-inline-form input,
+.panel-inline-form select {
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(18, 18, 27, 0.95);
+  color: var(--text);
+  padding: 8px 10px;
+  font-size: 12px;
 }
 
 .panel-summary {
@@ -973,6 +1267,79 @@ button {
   }
 }
 
+@keyframes bubble-wrap-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes bubble-selected-pop {
+  0% {
+    transform: translateY(0) scale(1);
+  }
+  100% {
+    transform: translateY(-1px) scale(1.01);
+  }
+}
+
+@keyframes reaction-picker-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes reaction-pill-in {
+  from {
+    opacity: 0;
+    transform: scale(0.86);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes reaction-active-pop {
+  0% {
+    transform: scale(0.9);
+  }
+  100% {
+    transform: scale(1.08);
+  }
+}
+
+@keyframes selected-tools-in {
+  from {
+    opacity: 0;
+    transform: translateY(5px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes popover-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 @keyframes typing-pulse {
   0%,
   100% {
@@ -991,9 +1358,25 @@ button {
   }
 
   .app-shell {
+    height: 100dvh;
     min-height: 100dvh;
     border-radius: 0;
     border-left: 0;
     border-right: 0;
+  }
+
+  .ds-composer {
+    padding-bottom: max(12px, env(safe-area-inset-bottom, 8px));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ds-bubble-wrap,
+  .ds-bubble,
+  .ds-selected-tools,
+  .ds-reaction-pill,
+  .ds-reaction-btn {
+    animation: none !important;
+    transition: none !important;
   }
 }

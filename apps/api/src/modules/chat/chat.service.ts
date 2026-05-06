@@ -19,6 +19,11 @@ import {
   UpdateMessageDto
 } from "./chat.dto.js";
 
+type MessageView = Message & {
+  displayAuthorName?: string;
+  displayAuthorUsername?: string;
+};
+
 @Injectable()
 export class ChatService {
   private readonly antiAbuseWindowSeconds: number;
@@ -63,7 +68,7 @@ export class ChatService {
     query: ChatBootstrapQueryDto = {}
   ): Promise<{
     chat: Awaited<ReturnType<ChatService["getChat"]>>;
-    messages: Message[];
+    messages: MessageView[];
     identities: ChatIdentity[];
     pagination: { before: string | null; limit: number };
     ws: { namespace: "/ws" };
@@ -90,18 +95,19 @@ export class ChatService {
     };
   }
 
-  async listMessages(chatId: string, requestUser: RequestUser, query: ListMessagesQueryDto = {}): Promise<Message[]> {
+  async listMessages(chatId: string, requestUser: RequestUser, query: ListMessagesQueryDto = {}): Promise<MessageView[]> {
     const member = await this.db.ensureMember(chatId, requestUser.userId);
     this.policy.assertMemberCanAccess(member);
     await this.policy.assertCan(chatId, member, "chat.view");
     const beforeTs = query.before ? this.parseDateQuery(query.before, "before") : null;
-    return this.db.listMessages(chatId, {
+    const messages = await this.db.listMessages(chatId, {
       before: beforeTs === null ? undefined : new Date(beforeTs).toISOString(),
       limit: query.limit
     });
+    return this.enrichMessagesWithAuthorInfo(chatId, messages);
   }
 
-  async searchMessages(chatId: string, requestUser: RequestUser, query: SearchMessagesQueryDto): Promise<Message[]> {
+  async searchMessages(chatId: string, requestUser: RequestUser, query: SearchMessagesQueryDto): Promise<MessageView[]> {
     const member = await this.db.ensureMember(chatId, requestUser.userId);
     this.policy.assertMemberCanAccess(member);
     await this.policy.assertCan(chatId, member, "message.search");
@@ -167,10 +173,10 @@ export class ChatService {
       }
     });
 
-    return result;
+    return this.enrichMessagesWithAuthorInfo(chatId, result);
   }
 
-  async createMessage(chatId: string, requestUser: RequestUser, dto: CreateMessageDto): Promise<Message> {
+  async createMessage(chatId: string, requestUser: RequestUser, dto: CreateMessageDto): Promise<MessageView> {
     const member = await this.db.ensureMember(chatId, requestUser.userId);
     this.policy.assertMemberCanAccess(member);
     await this.ensureCanSend(chatId, member, dto, requestUser.userId);
@@ -183,6 +189,12 @@ export class ChatService {
       identity = await this.db.getIdentity(chatId, dto.identity_id);
       if (!identity.isActive) {
         throw new BadRequestException("Identity is inactive.");
+      }
+      if (dto.sender_mode === "as_group" && identity.type !== "group") {
+        throw new BadRequestException("as_group mode requires a group identity.");
+      }
+      if (dto.sender_mode === "as_role_profile" && identity.type !== "role_profile") {
+        throw new BadRequestException("as_role_profile mode requires a role_profile identity.");
       }
     }
 
@@ -228,11 +240,12 @@ export class ChatService {
         e2eAlgorithm: dto.encrypted_payload?.algorithm ?? null
       }
     });
-    this.eventBus.emit("message.created", message);
-    return message;
+    const enriched = await this.enrichMessageWithAuthorInfo(chatId, message);
+    this.eventBus.emit("message.created", enriched);
+    return enriched;
   }
 
-  async updateMessage(chatId: string, messageId: string, requestUser: RequestUser, dto: UpdateMessageDto): Promise<Message> {
+  async updateMessage(chatId: string, messageId: string, requestUser: RequestUser, dto: UpdateMessageDto): Promise<MessageView> {
     const member = await this.db.ensureMember(chatId, requestUser.userId);
     this.policy.assertMemberCanAccess(member);
     const message = await this.db.getMessage(chatId, messageId);
@@ -256,11 +269,12 @@ export class ChatService {
         fields: Object.keys(dto)
       }
     });
-    this.eventBus.emit("message.updated", updated);
-    return updated;
+    const enriched = await this.enrichMessageWithAuthorInfo(chatId, updated);
+    this.eventBus.emit("message.updated", enriched);
+    return enriched;
   }
 
-  async deleteMessage(chatId: string, messageId: string, requestUser: RequestUser): Promise<Message> {
+  async deleteMessage(chatId: string, messageId: string, requestUser: RequestUser): Promise<MessageView> {
     const member = await this.db.ensureMember(chatId, requestUser.userId);
     this.policy.assertMemberCanAccess(member);
     const message = await this.db.getMessage(chatId, messageId);
@@ -275,8 +289,9 @@ export class ChatService {
       targetId: messageId,
       payload: {}
     });
-    this.eventBus.emit("message.deleted", deleted);
-    return deleted;
+    const enriched = await this.enrichMessageWithAuthorInfo(chatId, deleted);
+    this.eventBus.emit("message.deleted", enriched);
+    return enriched;
   }
 
   async pinMessage(chatId: string, messageId: string, requestUser: RequestUser): Promise<{ ok: true; messageId: string; pinnedAt: string }> {
@@ -328,7 +343,7 @@ export class ChatService {
   async listPinnedMessages(
     chatId: string,
     requestUser: RequestUser
-  ): Promise<Array<{ pinnedAt: string; message: Message }>> {
+  ): Promise<Array<{ pinnedAt: string; message: MessageView }>> {
     const member = await this.db.ensureMember(chatId, requestUser.userId);
     this.policy.assertMemberCanAccess(member);
     await this.policy.assertCan(chatId, member, "message.pin.view");
@@ -350,7 +365,7 @@ export class ChatService {
       }
     }
 
-    return Array.from(pinnedAtByMessageId.entries())
+    const entries = Array.from(pinnedAtByMessageId.entries())
       .map(([messageId, pinnedAt]) => {
         const message = messageById.get(messageId);
         if (!message) {
@@ -363,6 +378,15 @@ export class ChatService {
       })
       .filter((entry): entry is { pinnedAt: string; message: Message } => entry !== null)
       .sort((a, b) => b.pinnedAt.localeCompare(a.pinnedAt));
+    const enrichedMessages = await this.enrichMessagesWithAuthorInfo(
+      chatId,
+      entries.map((entry) => entry.message)
+    );
+    const enrichedById = new Map(enrichedMessages.map((message) => [message.id, message]));
+    return entries.map((entry) => ({
+      pinnedAt: entry.pinnedAt,
+      message: enrichedById.get(entry.message.id) ?? entry.message
+    }));
   }
 
   async listSavedViews(chatId: string, requestUser: RequestUser): Promise<SavedMessageView[]> {
@@ -606,7 +630,7 @@ export class ChatService {
 
     if (dto.sender_mode !== "as_user") {
       await this.policy.assertCan(chatId, normalizedMember, "message.send.as_group");
-      if (dto.identity_id) {
+      if (dto.sender_mode === "as_role_profile") {
         await this.policy.assertCan(chatId, normalizedMember, "message.send.as_group.profile.select");
       }
       if (dto.signature_mode === "hidden") {
@@ -787,6 +811,61 @@ export class ChatService {
         await this.applyExceededLimitAction(chatId, userId, limits, "burst_limit");
       }
     }
+  }
+
+  private async enrichMessageWithAuthorInfo(chatId: string, message: Message): Promise<MessageView> {
+    const [enriched] = await this.enrichMessagesWithAuthorInfo(chatId, [message]);
+    return enriched ?? message;
+  }
+
+  private async enrichMessagesWithAuthorInfo(chatId: string, messages: Message[]): Promise<MessageView[]> {
+    if (messages.length === 0) {
+      return [];
+    }
+
+    const userIds = new Set<string>();
+    const identityIds = new Set<string>();
+
+    for (const message of messages) {
+      if (message.displayAuthorType === "user") {
+        userIds.add(message.displayAuthorId);
+        userIds.add(message.authorId);
+      } else {
+        identityIds.add(message.displayAuthorId);
+      }
+    }
+
+    const usersById = new Map<string, Awaited<ReturnType<DatabaseService["getUserById"]>>>();
+    await Promise.all(
+      Array.from(userIds).map(async (userId) => {
+        usersById.set(userId, await this.db.getUserById(userId));
+      })
+    );
+
+    let identityNameById = new Map<string, string>();
+    if (identityIds.size > 0) {
+      const identities = await this.db.listIdentities(chatId);
+      identityNameById = new Map(identities.map((identity) => [identity.id, identity.name]));
+    }
+
+    return messages.map((message) => {
+      if (message.displayAuthorType === "user") {
+        const user = usersById.get(message.displayAuthorId) ?? usersById.get(message.authorId);
+        const fullName = [user?.firstName, user?.lastName].filter(Boolean).join(" ").trim();
+        const displayAuthorName = user?.username ? `@${user.username}` : (fullName || undefined);
+        return {
+          ...message,
+          displayAuthorName,
+          displayAuthorUsername: user?.username
+        };
+      }
+
+      const identityName = identityNameById.get(message.displayAuthorId);
+      return {
+        ...message,
+        displayAuthorName: identityName
+      };
+    });
   }
 
   private resolveAntiAbuseWindowSeconds(): number {

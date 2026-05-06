@@ -1,4 +1,4 @@
-import { type ChangeEvent, type FormEvent } from "react";
+import { type ChangeEvent, type FormEvent, type KeyboardEvent, useEffect, useRef } from "react";
 
 import { Avatar, Badge, Button, cn } from "@/design-system/primitives";
 
@@ -24,17 +24,136 @@ export type MessageItem = {
 
 type MessageBubbleProps = {
   item: MessageItem;
-  onAddReaction: () => void;
-  onRemoveReaction: () => void;
+  selected?: boolean;
+  selectedReaction?: string;
+  onSelect?: () => void;
+  onOpenActions?: () => void;
+  onAddReaction: (reaction: string) => void | Promise<void>;
+  onRemoveReaction: () => void | Promise<void>;
   onEdit?: () => void;
   onDelete?: () => void;
 };
 
-export function MessageBubble({ item, onAddReaction, onRemoveReaction, onEdit, onDelete }: MessageBubbleProps) {
+const QUICK_REACTIONS = ["👍", "❤️", "🔥", "😂", "😮", "👏"] as const;
+
+export function MessageBubble({
+  item,
+  selected = false,
+  selectedReaction,
+  onSelect,
+  onOpenActions,
+  onAddReaction,
+  onRemoveReaction,
+  onEdit,
+  onDelete
+}: MessageBubbleProps) {
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressTriggeredRef = useRef(false);
+
+  function clearLongPressTimer(): void {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  }
+
+  function isCoarsePointer(): boolean {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return false;
+    }
+    return window.matchMedia("(pointer: coarse)").matches;
+  }
+
   return (
-    <article className={cn("ds-bubble-wrap", item.own ? "is-own" : undefined)}>
+    <article className={cn("ds-bubble-wrap", item.own ? "is-own" : undefined, selected ? "is-selected" : undefined)}>
       {!item.own ? <Avatar size="sm" name={item.authorName} className="ds-bubble-avatar" /> : null}
-      <div className={cn("ds-bubble", item.own ? "ds-bubble-own" : "ds-bubble-guest")}>
+      <div
+        className={cn("ds-bubble", item.own ? "ds-bubble-own" : "ds-bubble-guest")}
+        role="button"
+        tabIndex={0}
+        onClick={() => {
+          if (isCoarsePointer()) {
+            return;
+          }
+          if (longPressTriggeredRef.current) {
+            longPressTriggeredRef.current = false;
+            return;
+          }
+          onSelect?.();
+        }}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          (onOpenActions ?? onSelect)?.();
+        }}
+        onTouchStart={() => {
+          clearLongPressTimer();
+          longPressTriggeredRef.current = false;
+          longPressTimerRef.current = setTimeout(() => {
+            longPressTriggeredRef.current = true;
+            (onOpenActions ?? onSelect)?.();
+          }, 360);
+        }}
+        onTouchEnd={clearLongPressTimer}
+        onTouchCancel={clearLongPressTimer}
+        onTouchMove={clearLongPressTimer}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            onSelect?.();
+          }
+        }}
+      >
+        {selected && !item.deleted ? (
+          <div
+            className="ds-bubble-popover"
+            onClick={(event) => {
+              event.stopPropagation();
+            }}
+          >
+            <div className="ds-reaction-picker ds-selected-tools">
+              {QUICK_REACTIONS.map((emoji) => (
+                <button
+                  key={`${item.id}:quick:${emoji}`}
+                  type="button"
+                  className={cn("ds-reaction-btn", selectedReaction === emoji ? "is-active" : undefined)}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    if (selectedReaction === emoji) {
+                      void onRemoveReaction();
+                      return;
+                    }
+                    void onAddReaction(emoji);
+                  }}
+                  aria-label={`React ${emoji}`}
+                >
+                  {emoji}
+                </button>
+              ))}
+            </div>
+            {item.own && !item.encrypted ? (
+              <div className="ds-action-row ds-selected-tools ds-popover-actions">
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onEdit?.();
+                  }}
+                >
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onDelete?.();
+                  }}
+                >
+                  Delete
+                </button>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
         <header className="ds-bubble-head">
           <span>{item.own ? "You" : item.authorName}</span>
           <time>{item.createdAtLabel}</time>
@@ -47,30 +166,24 @@ export function MessageBubble({ item, onAddReaction, onRemoveReaction, onEdit, o
             {item.deleted ? <Badge variant="danger">deleted</Badge> : null}
             {item.status === "pending" ? <Badge variant="neutral">sending</Badge> : null}
           </div>
-          <div className="ds-action-row">
-            <button type="button" onClick={onAddReaction} disabled={item.deleted}>
-              +👍
-            </button>
-            <button type="button" onClick={onRemoveReaction} disabled={item.deleted}>
-              -👍
-            </button>
-            {item.own && !item.deleted && !item.encrypted ? (
-              <>
-                <button type="button" onClick={onEdit}>
-                  edit
-                </button>
-                <button type="button" onClick={onDelete}>
-                  delete
-                </button>
-              </>
-            ) : null}
-          </div>
           {item.reactions && item.reactions.length > 0 ? (
             <div className="ds-reaction-row">
               {item.reactions.map((reaction) => (
-                <span key={`${item.id}:${reaction.reaction}`} className="ds-reaction-pill">
+                <button
+                  key={`${item.id}:${reaction.reaction}`}
+                  type="button"
+                  className={cn("ds-reaction-pill", selectedReaction === reaction.reaction ? "is-active" : undefined)}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    if (selectedReaction === reaction.reaction) {
+                      void onRemoveReaction();
+                      return;
+                    }
+                    void onAddReaction(reaction.reaction);
+                  }}
+                >
                   {reaction.reaction} {reaction.count}
-                </span>
+                </button>
               ))}
             </div>
           ) : null}
@@ -135,9 +248,44 @@ export function Composer({
   onSubmit,
   onTyping
 }: ComposerProps) {
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  function resizeTextarea(): void {
+    const textarea = textareaRef.current;
+    if (!textarea) {
+      return;
+    }
+    textarea.style.height = "0px";
+    const maxHeight = Math.floor(window.innerHeight * 0.33);
+    const next = Math.min(textarea.scrollHeight, maxHeight);
+    textarea.style.height = `${Math.max(56, next)}px`;
+  }
+
+  useEffect(() => {
+    resizeTextarea();
+  }, [draft]);
+
   function handleChange(event: ChangeEvent<HTMLTextAreaElement>): void {
     onChange(event.target.value);
     onTyping();
+    resizeTextarea();
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
+    if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) {
+      return;
+    }
+
+    const isTouchDevice = window.matchMedia("(pointer: coarse)").matches;
+    if (isTouchDevice) {
+      return;
+    }
+
+    event.preventDefault();
+    if (disabled || sending || draft.trim().length === 0) {
+      return;
+    }
+    event.currentTarget.form?.requestSubmit();
   }
 
   return (
@@ -159,8 +307,10 @@ export function Composer({
       </div>
       <label className="ds-composer-field">
         <textarea
+          ref={textareaRef}
           value={draft}
           onChange={handleChange}
+          onKeyDown={handleKeyDown}
           rows={2}
           maxLength={4000}
           placeholder="Write a message..."

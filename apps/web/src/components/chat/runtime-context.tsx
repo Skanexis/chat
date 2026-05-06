@@ -5,8 +5,8 @@ import { type FormEvent, createContext, useCallback, useContext, useEffect, useM
 import { type SenderModeValue } from "@/design-system";
 import { ApiClient, ApiClientError } from "@/lib/api-client";
 import { appConfig } from "@/lib/config";
-import { loadSession } from "@/lib/session";
-import { getTelegramInitData, initTelegramViewport } from "@/lib/telegram";
+import { clearSession, loadSession } from "@/lib/session";
+import { getTelegramInitData, getTelegramInitDataUserId, initTelegramViewport } from "@/lib/telegram";
 import type {
   BootstrapResponse,
   ChatIdentity,
@@ -47,6 +47,7 @@ type ChatRuntimeValue = {
   identities: ChatIdentity[];
   messages: UiMessage[];
   reactionByMessage: Record<string, ReactionSummaryEntry[]>;
+  ownReactionByMessage: Record<string, string | undefined>;
   typingUsers: string[];
   liveTicketsById: Record<string, WsTicketUpdatedPayload>;
   liveAutomationExecutions: WsAutomationRuleExecutedPayload[];
@@ -80,7 +81,7 @@ type ChatRuntimeValue = {
   onSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   onEdit: (messageId: string, currentText: string | undefined) => Promise<void>;
   onDelete: (messageId: string) => Promise<void>;
-  onAddReaction: (messageId: string) => Promise<void>;
+  onAddReaction: (messageId: string, reaction: string) => Promise<void>;
   onRemoveReaction: (messageId: string) => Promise<void>;
 };
 
@@ -130,6 +131,7 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
   const [identities, setIdentities] = useState<ChatIdentity[]>([]);
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [reactionByMessage, setReactionByMessage] = useState<Record<string, ReactionSummaryEntry[]>>({});
+  const [ownReactionByMessage, setOwnReactionByMessage] = useState<Record<string, string | undefined>>({});
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
   const [liveTicketsById, setLiveTicketsById] = useState<Record<string, WsTicketUpdatedPayload>>({});
   const [liveAutomationExecutions, setLiveAutomationExecutions] = useState<WsAutomationRuleExecutedPayload[]>([]);
@@ -156,9 +158,31 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
 
   const currentUserId = session?.user.id ?? null;
   const roleName = chat?.member.role.name ?? "member";
+  const rolePermissions = chat?.member.role.permissions ?? [];
   const normalizedRole = roleName.toLowerCase();
-  const isAdmin = normalizedRole.includes("admin");
-  const isModerator = isAdmin || normalizedRole.includes("moderator");
+  const isOwnerLike = normalizedRole.includes("owner") || normalizedRole.includes("creator");
+  const isAdminByName = normalizedRole.includes("admin") || isOwnerLike;
+  const isAdminByPermission = rolePermissions.some((permission) =>
+    permission.startsWith("role.") ||
+    permission.startsWith("invite.") ||
+    permission.startsWith("channel_notify.") ||
+    permission.startsWith("broadcast.") ||
+    permission.startsWith("webhook.") ||
+    permission.startsWith("automation.") ||
+    permission.startsWith("incident_mode.") ||
+    permission.startsWith("audit.")
+  );
+  const isModeratorByName = normalizedRole.includes("moderator");
+  const isModeratorByPermission = rolePermissions.some((permission) =>
+    permission.startsWith("member.") ||
+    permission.startsWith("ticket.") ||
+    permission.startsWith("temp_room.") ||
+    permission === "message.search" ||
+    permission === "message.pin" ||
+    permission === "message.pin.view"
+  );
+  const isAdmin = isAdminByName || isAdminByPermission;
+  const isModerator = isAdmin || isModeratorByName || isModeratorByPermission;
 
   const markWsEvent = useCallback((): void => {
     setWsLastEventAt(new Date().toISOString());
@@ -193,17 +217,33 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
         setLiveThreadSubscriptionTriggers([]);
         setLiveInvalidation({ invites: 0, webhooks: 0, threadSubscriptions: 0, reputation: 0 });
         setWsLastEventAt(null);
+        setOwnReactionByMessage({});
 
         const api = apiRef.current;
+        const initData = getTelegramInitData();
+        const telegramInitUserId = getTelegramInitDataUserId(initData);
         const stored = loadSession();
         if (stored) {
-          api.setSession(stored);
-          setSession(stored);
+          const sessionMismatch =
+            telegramInitUserId !== null &&
+            Number.isFinite(stored.user.telegramId) &&
+            stored.user.telegramId !== telegramInitUserId;
+
+          if (sessionMismatch) {
+            clearSession();
+            api.setSession(null);
+            setSession(null);
+          } else {
+            api.setSession(stored);
+            setSession(stored);
+          }
         }
 
         let activeSession = stored;
+        if (activeSession && telegramInitUserId !== null && activeSession.user.telegramId !== telegramInitUserId) {
+          activeSession = null;
+        }
         if (!activeSession) {
-          const initData = getTelegramInitData();
           const authResponse = await api.authTelegram(initData, chatId);
           activeSession = {
             accessToken: authResponse.accessToken,
@@ -364,24 +404,32 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
 
   const groupIdentity = identities.find((entry) => entry.type === "group" && entry.isActive);
   const roleProfileIdentity = identities.find((entry) => entry.type === "role_profile" && entry.isActive);
+  const senderRolePermissions = chat?.member.role.permissions ?? [];
+  const hasSenderPermission = (permission: string): boolean =>
+    senderRolePermissions.includes("*") || senderRolePermissions.includes(permission);
+  const canUseGroupSender = hasSenderPermission("message.send.as_group");
+  const canUseRoleProfileSender =
+    hasSenderPermission("message.send.as_group") && hasSenderPermission("message.send.as_group.profile.select");
 
   useEffect(() => {
-    if (senderMode === "as_group" && !groupIdentity) {
+    if (senderMode === "as_group" && (!canUseGroupSender || !groupIdentity)) {
       setSenderMode("as_user");
     }
-    if (senderMode === "as_role_profile" && !roleProfileIdentity) {
+    if (senderMode === "as_role_profile" && (!canUseRoleProfileSender || !roleProfileIdentity)) {
       setSenderMode("as_user");
     }
-  }, [groupIdentity, roleProfileIdentity, senderMode]);
+  }, [canUseGroupSender, canUseRoleProfileSender, groupIdentity, roleProfileIdentity, senderMode]);
 
-  const senderOptions = useMemo(
-    () => [
-      { value: "as_user" as const, label: "You" },
-      { value: "as_group" as const, label: "Group", disabled: !groupIdentity },
-      { value: "as_role_profile" as const, label: "Role", disabled: !roleProfileIdentity }
-    ],
-    [groupIdentity, roleProfileIdentity]
-  );
+  const senderOptions = useMemo(() => {
+    const options: Array<{ value: SenderModeValue; label: string; disabled?: boolean }> = [{ value: "as_user", label: "You" }];
+    if (canUseGroupSender) {
+      options.push({ value: "as_group", label: "Group", disabled: !groupIdentity });
+    }
+    if (canUseRoleProfileSender) {
+      options.push({ value: "as_role_profile", label: "Role", disabled: !roleProfileIdentity });
+    }
+    return options;
+  }, [canUseGroupSender, canUseRoleProfileSender, groupIdentity, roleProfileIdentity]);
 
   const canSend = chat?.member.status === "active";
   const restrictionText =
@@ -421,6 +469,14 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
     }
 
     const identityId = resolveIdentityId();
+    if (senderMode === "as_group" && !canUseGroupSender) {
+      setError({ message: "Group sender mode is not allowed for your role.", statusCode: 403 });
+      return;
+    }
+    if (senderMode === "as_role_profile" && !canUseRoleProfileSender) {
+      setError({ message: "Role sender mode is not allowed for your role.", statusCode: 403 });
+      return;
+    }
     if (senderMode !== "as_user" && !identityId) {
       setError({ message: "Selected sender mode requires an active identity.", statusCode: 403 });
       return;
@@ -428,6 +484,12 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
 
     const tempId = `tmp-${Date.now()}`;
     const now = new Date().toISOString();
+    const ownDisplayName =
+      session?.user.username
+        ? `@${session.user.username}`
+        : [session?.user.firstName, session?.user.lastName].filter(Boolean).join(" ").trim() || undefined;
+    const identityDisplayName =
+      senderMode === "as_group" ? groupIdentity?.name : senderMode === "as_role_profile" ? roleProfileIdentity?.name : undefined;
     const optimistic: UiMessage = {
       id: tempId,
       chatId: chat.id,
@@ -436,6 +498,8 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
       displayAuthorType:
         senderMode === "as_group" ? "group" : senderMode === "as_role_profile" ? "role_profile" : "user",
       displayAuthorId: identityId ?? (currentUserId ?? "unknown"),
+      displayAuthorName: identityDisplayName ?? ownDisplayName,
+      displayAuthorUsername: senderMode === "as_user" ? session?.user.username : undefined,
       senderMode,
       text,
       media: null,
@@ -492,11 +556,21 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
     }
   }
 
-  async function onAddReaction(messageId: string): Promise<void> {
+  async function onAddReaction(messageId: string, reaction: string): Promise<void> {
     if (!chat) return;
     try {
-      const result = await apiRef.current.setReaction(chat.id, messageId, "👍");
+      const currentOwnReaction = ownReactionByMessage[messageId];
+      if (currentOwnReaction === reaction) {
+        const removed = await apiRef.current.removeReaction(chat.id, messageId);
+        setReactionByMessage((prev) => ({ ...prev, [removed.messageId]: removed.summary }));
+        setOwnReactionByMessage((prev) => ({ ...prev, [messageId]: undefined }));
+        setError(null);
+        return;
+      }
+
+      const result = await apiRef.current.setReaction(chat.id, messageId, reaction);
       setReactionByMessage((prev) => ({ ...prev, [result.messageId]: result.summary }));
+      setOwnReactionByMessage((prev) => ({ ...prev, [result.messageId]: reaction }));
       setError(null);
     } catch (reactionError) {
       setError(parseError(reactionError));
@@ -508,6 +582,7 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
     try {
       const result = await apiRef.current.removeReaction(chat.id, messageId);
       setReactionByMessage((prev) => ({ ...prev, [result.messageId]: result.summary }));
+      setOwnReactionByMessage((prev) => ({ ...prev, [result.messageId]: undefined }));
       setError(null);
     } catch (reactionError) {
       setError(parseError(reactionError));
@@ -539,6 +614,7 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
       identities,
       messages,
       reactionByMessage,
+      ownReactionByMessage,
       typingUsers,
       liveTicketsById,
       liveAutomationExecutions,
@@ -590,6 +666,7 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
       liveTicketsById,
       messages,
       reactionByMessage,
+      ownReactionByMessage,
       restrictionText,
       roleName,
       senderMode,

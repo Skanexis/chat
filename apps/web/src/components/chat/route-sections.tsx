@@ -74,6 +74,19 @@ function shortId(value: string): string {
   return value.length <= 8 ? value : value.slice(0, 8);
 }
 
+function resolveAuthorLabel(message: Pick<ChatMessage, "authorId" | "displayAuthorId" | "displayAuthorName" | "displayAuthorUsername">, currentUserId?: string | null): string {
+  if (currentUserId && message.authorId === currentUserId) {
+    return "You";
+  }
+  if (message.displayAuthorName && message.displayAuthorName.trim().length > 0) {
+    return message.displayAuthorName;
+  }
+  if (message.displayAuthorUsername && message.displayAuthorUsername.trim().length > 0) {
+    return `@${message.displayAuthorUsername}`;
+  }
+  return shortId(message.displayAuthorId);
+}
+
 function getMessagePreview(message: UiMessage | ChatMessage): string {
   if (message.isDeleted) return "[deleted]";
   if (message.isEncrypted) return "[encrypted payload]";
@@ -137,6 +150,137 @@ function csvNumbers(input: string): number[] {
     .map((entry) => Math.floor(entry));
 }
 
+const ROLE_PERMISSION_GROUPS: Array<{ label: string; permissions: string[] }> = [
+  {
+    label: "Chat Core",
+    permissions: [
+      "chat.view",
+      "message.send.text",
+      "message.send.reply",
+      "message.react",
+      "message.edit.own",
+      "message.delete.own",
+      "message.search",
+      "message.pin.view"
+    ]
+  },
+  {
+    label: "Moderation",
+    permissions: [
+      "member.view_list",
+      "member.mute",
+      "member.unmute",
+      "member.timeout.set",
+      "member.timeout.clear",
+      "member.kick",
+      "member.ban",
+      "member.unban"
+    ]
+  },
+  {
+    label: "Roles and Access",
+    permissions: [
+      "role.create",
+      "role.update",
+      "role.assign",
+      "role.unassign",
+      "permission.grant",
+      "permission.revoke"
+    ]
+  },
+  {
+    label: "Advanced Sender and Features",
+    permissions: [
+      "message.send.as_group",
+      "message.send.as_group.profile.select",
+      "message.send.poll",
+      "read_receipt.privacy.manage",
+      "bookmark.create",
+      "reminder.create",
+      "thread.subscription.manage"
+    ]
+  },
+  {
+    label: "Admin Operations",
+    permissions: [
+      "limit.view",
+      "limit.update.role",
+      "channel.notify.enable",
+      "broadcast.create",
+      "broadcast.approve",
+      "integration.webhook.create",
+      "automation.rule.create",
+      "incident_mode.enable",
+      "audit.view"
+    ]
+  }
+];
+
+const ROLE_PERMISSION_PRESETS: Record<string, string[]> = {
+  member_default: [
+    "chat.view",
+    "message.send.text",
+    "message.send.reply",
+    "message.react",
+    "message.edit.own",
+    "message.delete.own"
+  ],
+  moderator_core: [
+    "chat.view",
+    "message.send.text",
+    "message.send.reply",
+    "message.react",
+    "message.edit.own",
+    "message.delete.own",
+    "message.search",
+    "message.pin.view",
+    "member.view_list",
+    "member.mute",
+    "member.unmute",
+    "member.timeout.set",
+    "member.timeout.clear",
+    "member.kick",
+    "member.ban",
+    "member.unban"
+  ],
+  admin_core: [
+    "chat.view",
+    "message.send.text",
+    "message.send.reply",
+    "message.react",
+    "message.edit.own",
+    "message.delete.own",
+    "message.delete.any",
+    "message.edit.any",
+    "message.search",
+    "message.pin",
+    "message.pin.view",
+    "message.unpin",
+    "member.view_list",
+    "member.mute",
+    "member.unmute",
+    "member.timeout.set",
+    "member.timeout.clear",
+    "member.kick",
+    "member.ban",
+    "member.unban",
+    "role.create",
+    "role.update",
+    "role.assign",
+    "role.unassign",
+    "permission.grant",
+    "permission.revoke",
+    "limit.view",
+    "limit.update.role",
+    "channel.notify.enable",
+    "broadcast.create",
+    "automation.rule.create",
+    "incident_mode.enable",
+    "audit.view"
+  ],
+  owner_all: ["*"]
+};
+
 function parseJsonOrThrow(input: string): unknown {
   const text = input.trim();
   if (!text) {
@@ -175,18 +319,43 @@ function PanelErrorState({ error, onRetry }: { error: PanelError; onRetry: () =>
 export function ChatMainSection() {
   const runtime = useChatRuntime();
   const feedRef = useRef<HTMLDivElement | null>(null);
+  const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null);
+  const [isNearBottom, setIsNearBottom] = useState(true);
 
   useEffect(() => {
-    if (!feedRef.current) {
+    const feed = feedRef.current;
+    if (!feed || !isNearBottom) {
       return;
     }
-    feedRef.current.scrollTop = feedRef.current.scrollHeight;
-  }, [runtime.messages]);
+    feed.scrollTop = feed.scrollHeight;
+  }, [isNearBottom, runtime.messages]);
+
+  useEffect(() => {
+    if (!selectedMessageId) {
+      return;
+    }
+    if (!runtime.messages.some((message) => message.id === selectedMessageId)) {
+      setSelectedMessageId(null);
+    }
+  }, [runtime.messages, selectedMessageId]);
 
   return (
-    <>
+    <section className="chat-main">
       <PinnedBanner message="Welcome to Ristoranti Chat. Follow the rules and use role-aware sender mode when needed." />
-      <div className="chat-feed" ref={feedRef}>
+      <div
+        className="chat-feed"
+        ref={feedRef}
+        onScroll={(event) => {
+          const target = event.currentTarget;
+          const distance = target.scrollHeight - target.scrollTop - target.clientHeight;
+          setIsNearBottom(distance < 72);
+        }}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) {
+            setSelectedMessageId(null);
+          }
+        }}
+      >
         {runtime.messages.length === 0 ? (
           <StateBlock state="empty" title="No messages yet" description="Send the first message to start the thread." />
         ) : (
@@ -197,7 +366,7 @@ export function ChatMainSection() {
                 id: message.id,
                 own: message.authorId === runtime.currentUserId,
                 authorId: message.authorId,
-                authorName: message.authorId === runtime.currentUserId ? "You" : shortId(message.displayAuthorId),
+                authorName: resolveAuthorLabel(message, runtime.currentUserId),
                 text: getMessagePreview(message),
                 createdAtLabel: new Date(message.createdAt).toLocaleTimeString([], {
                   hour: "2-digit",
@@ -210,7 +379,15 @@ export function ChatMainSection() {
                 status: message.localStatus === "pending" ? "pending" : "read",
                 reactions: runtime.reactionByMessage[message.id] ?? []
               }}
-              onAddReaction={() => runtime.onAddReaction(message.id)}
+              selected={selectedMessageId === message.id}
+              selectedReaction={runtime.ownReactionByMessage[message.id]}
+              onSelect={() => {
+                setSelectedMessageId((prev) => (prev === message.id ? null : message.id));
+              }}
+              onOpenActions={() => {
+                setSelectedMessageId(message.id);
+              }}
+              onAddReaction={(reaction) => runtime.onAddReaction(message.id, reaction)}
               onRemoveReaction={() => runtime.onRemoveReaction(message.id)}
               onEdit={() => runtime.onEdit(message.id, message.text)}
               onDelete={() => runtime.onDelete(message.id)}
@@ -218,6 +395,24 @@ export function ChatMainSection() {
           ))
         )}
       </div>
+      {!isNearBottom ? (
+        <div className="chat-scroll-actions">
+          <button
+            type="button"
+            className="chat-scroll-bottom-btn"
+            onClick={() => {
+              const feed = feedRef.current;
+              if (!feed) {
+                return;
+              }
+              feed.scrollTo({ top: feed.scrollHeight, behavior: "smooth" });
+              setIsNearBottom(true);
+            }}
+          >
+            Jump to latest
+          </button>
+        </div>
+      ) : null}
       <TypingIndicator users={runtime.typingUsers.map(shortId)} />
       {runtime.restrictionText ? <RestrictionHint message={runtime.restrictionText} variant="warning" /> : null}
       <Composer
@@ -231,7 +426,7 @@ export function ChatMainSection() {
         onTyping={runtime.onTyping}
         onSubmit={runtime.onSubmit}
       />
-    </>
+    </section>
   );
 }
 
@@ -246,7 +441,7 @@ function MessageListCard({ title, subtitle, messages }: { title: string; subtitl
           {messages.map((message) => (
             <article key={message.id} className="panel-item">
               <header>
-                <strong>{shortId(message.displayAuthorId)}</strong>
+                <strong>{resolveAuthorLabel(message)}</strong>
                 <time>{formatDateTime(message.createdAt)}</time>
               </header>
               <p>{getMessagePreview(message)}</p>
@@ -446,7 +641,7 @@ export function SearchSection() {
             results.map((message) => (
               <article key={message.id} className="panel-item">
                 <header>
-                  <strong>{shortId(message.displayAuthorId)}</strong>
+                  <strong>{resolveAuthorLabel(message)}</strong>
                   <time>{formatDateTime(message.createdAt)}</time>
                 </header>
                 <p>{getMessagePreview(message)}</p>
@@ -507,7 +702,7 @@ export function PinnedSection() {
           {items.map((entry) => (
             <article key={entry.message.id} className="panel-item">
               <header>
-                <strong>{shortId(entry.message.displayAuthorId)}</strong>
+                <strong>{resolveAuthorLabel(entry.message)}</strong>
                 <time>pinned: {formatDateTime(entry.pinnedAt)}</time>
               </header>
               <p>{getMessagePreview(entry.message)}</p>
@@ -3147,6 +3342,133 @@ function AdminNavChips() {
   );
 }
 
+export function AdminHubSection() {
+  const runtime = useChatRuntime();
+  const api = useAuthedApi();
+  const base = `/chat/${encodeURIComponent(runtime.chatId)}/admin`;
+  const [stats, setStats] = useState<{
+    members: number;
+    banned: number;
+    muted: number;
+    roles: number;
+    joinRequests: number;
+  } | null>(null);
+  const [statsError, setStatsError] = useState<string | null>(null);
+  const moderatorLinks = [
+    { href: `${base}/members`, label: "Members" },
+    { href: `${base}/member-meta`, label: "Member Meta" },
+    { href: `${base}/temp-rooms`, label: "Temp Rooms" },
+    { href: `${base}/tickets`, label: "Tickets" }
+  ];
+  const adminLinks = [
+    { href: `${base}/roles`, label: "Roles" },
+    { href: `${base}/limits`, label: "Limits" },
+    { href: `${base}/invites`, label: "Invites" },
+    { href: `${base}/channel-notify`, label: "Notify" },
+    { href: `${base}/broadcasts`, label: "Broadcasts" },
+    { href: `${base}/webhooks`, label: "Webhooks" },
+    { href: `${base}/automation`, label: "Automation" },
+    { href: `${base}/incident`, label: "Incident" },
+    { href: `${base}/audit`, label: "Audit" }
+  ];
+
+  useEffect(() => {
+    let alive = true;
+    async function loadStats(): Promise<void> {
+      setStatsError(null);
+      try {
+        const [members, roles, requests] = await Promise.all([
+          api.listMembers(runtime.chatId),
+          api.listRoles(runtime.chatId).catch(() => []),
+          api.listJoinRequests(runtime.chatId, "pending").catch(() => ({ requests: [] }))
+        ]);
+        if (!alive) {
+          return;
+        }
+        const banned = members.members.filter((entry) => entry.status === "banned").length;
+        const muted = members.members.filter((entry) => entry.status === "muted").length;
+        setStats({
+          members: members.members.length,
+          banned,
+          muted,
+          roles: roles.length,
+          joinRequests: requests.requests.length
+        });
+      } catch (error) {
+        if (!alive) {
+          return;
+        }
+        setStatsError(parseError(error).message);
+      }
+    }
+
+    void loadStats();
+    return () => {
+      alive = false;
+    };
+  }, [api, runtime.chatId]);
+
+  return (
+    <PermissionGate allowed={runtime.isModerator} hint="Moderator permissions are required for admin sections.">
+      <Card className="app-tab-card">
+        <SectionTitle
+          title="Admin Hub"
+          subtitle="Quick access to moderation and administration sections."
+        />
+        {stats ? (
+          <div className="admin-stats-grid">
+            <article className="admin-stat-card">
+              <strong>{stats.members}</strong>
+              <span>Members</span>
+            </article>
+            <article className="admin-stat-card">
+              <strong>{stats.muted}</strong>
+              <span>Muted</span>
+            </article>
+            <article className="admin-stat-card">
+              <strong>{stats.banned}</strong>
+              <span>Banned</span>
+            </article>
+            <article className="admin-stat-card">
+              <strong>{stats.roles}</strong>
+              <span>Roles</span>
+            </article>
+            <article className="admin-stat-card">
+              <strong>{stats.joinRequests}</strong>
+              <span>Pending Joins</span>
+            </article>
+          </div>
+        ) : null}
+        {statsError ? <RestrictionHint message={statsError} variant="warning" /> : null}
+        <div className="panel-subcard">
+          <SectionTitle title="Moderation" />
+          <div className="panel-chip-list">
+            {moderatorLinks.map((link) => (
+              <div key={link.href} className="panel-chip">
+                <Link href={link.href}>{link.label}</Link>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="panel-subcard">
+          <SectionTitle title="Administration" subtitle={runtime.isAdmin ? "Full access available." : "Admin role required."} />
+          {runtime.isAdmin ? (
+            <div className="panel-chip-list">
+              {adminLinks.map((link) => (
+                <div key={link.href} className="panel-chip">
+                  <Link href={link.href}>{link.label}</Link>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <RestrictionHint message="Switch to admin/owner role to open these sections." />
+          )}
+        </div>
+      </Card>
+    </PermissionGate>
+  );
+}
+
 export function RolesAdminSection() {
   const runtime = useChatRuntime();
   const api = useAuthedApi();
@@ -3160,6 +3482,13 @@ export function RolesAdminSection() {
   const [simulationPerms, setSimulationPerms] = useState("chat.view,message.send.text");
   const [simulationActorId, setSimulationActorId] = useState("");
   const [simulation, setSimulation] = useState<PermissionSimulationResult | null>(null);
+  const [selectedRoleId, setSelectedRoleId] = useState("");
+  const [editorName, setEditorName] = useState("");
+  const [editorPriority, setEditorPriority] = useState("50");
+  const [editorIsDefault, setEditorIsDefault] = useState(false);
+  const [editorPermissions, setEditorPermissions] = useState<string[]>([]);
+  const [grantPermissionInput, setGrantPermissionInput] = useState("");
+  const [revokePermissionInput, setRevokePermissionInput] = useState("");
 
   const load = useCallback(async () => {
     setState("loading");
@@ -3178,6 +3507,25 @@ export function RolesAdminSection() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (roles.length === 0) {
+      setSelectedRoleId("");
+      setEditorPermissions([]);
+      return;
+    }
+
+    const selected = roles.find((entry) => entry.id === selectedRoleId) ?? roles[0];
+    if (!selected) {
+      return;
+    }
+
+    setSelectedRoleId(selected.id);
+    setEditorName(selected.name);
+    setEditorPriority(String(selected.priority));
+    setEditorIsDefault(selected.isDefault);
+    setEditorPermissions(selected.permissions);
+  }, [roles, selectedRoleId]);
 
   async function handleCreateRole(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -3206,40 +3554,6 @@ export function RolesAdminSection() {
       await load();
     } catch (createError) {
       setError(parseError(createError));
-    } finally {
-      setUpdating(false);
-    }
-  }
-
-  async function handleGrant(roleId: string): Promise<void> {
-    const permission = window.prompt("Permission to grant");
-    if (!permission) {
-      return;
-    }
-    setUpdating(true);
-    setError(null);
-    try {
-      await api.grantRolePermissions(runtime.chatId, roleId, [permission.trim()]);
-      await load();
-    } catch (grantError) {
-      setError(parseError(grantError));
-    } finally {
-      setUpdating(false);
-    }
-  }
-
-  async function handleRevoke(roleId: string): Promise<void> {
-    const permission = window.prompt("Permission to revoke");
-    if (!permission) {
-      return;
-    }
-    setUpdating(true);
-    setError(null);
-    try {
-      await api.revokeRolePermissions(runtime.chatId, roleId, [permission.trim()]);
-      await load();
-    } catch (revokeError) {
-      setError(parseError(revokeError));
     } finally {
       setUpdating(false);
     }
@@ -3311,6 +3625,85 @@ export function RolesAdminSection() {
     }
   }
 
+  function toggleEditorPermission(permission: string): void {
+    setEditorPermissions((prev) =>
+      prev.includes(permission) ? prev.filter((entry) => entry !== permission) : [...prev, permission]
+    );
+  }
+
+  function applyPermissionPreset(presetKey: keyof typeof ROLE_PERMISSION_PRESETS): void {
+    const preset = ROLE_PERMISSION_PRESETS[presetKey];
+    setEditorPermissions((prev) => Array.from(new Set([...prev, ...preset])));
+  }
+
+  async function handleSaveSelectedRole(): Promise<void> {
+    if (!selectedRoleId) {
+      setError({ message: "Select role first." });
+      return;
+    }
+    const nextPriority = Number(editorPriority);
+    if (!Number.isFinite(nextPriority)) {
+      setError({ message: "Role priority must be a valid number." });
+      return;
+    }
+    if (editorPermissions.length === 0) {
+      setError({ message: "At least one permission is required." });
+      return;
+    }
+
+    setUpdating(true);
+    setError(null);
+    try {
+      await api.updateRole(runtime.chatId, selectedRoleId, {
+        name: editorName.trim(),
+        priority: Math.floor(nextPriority),
+        permissions: editorPermissions,
+        isDefault: editorIsDefault
+      });
+      await load();
+    } catch (updateError) {
+      setError(parseError(updateError));
+    } finally {
+      setUpdating(false);
+    }
+  }
+
+  async function handleGrantFromInput(roleId: string): Promise<void> {
+    const permission = grantPermissionInput.trim();
+    if (!permission) {
+      return;
+    }
+    setUpdating(true);
+    setError(null);
+    try {
+      await api.grantRolePermissions(runtime.chatId, roleId, [permission]);
+      setGrantPermissionInput("");
+      await load();
+    } catch (grantError) {
+      setError(parseError(grantError));
+    } finally {
+      setUpdating(false);
+    }
+  }
+
+  async function handleRevokeFromInput(roleId: string): Promise<void> {
+    const permission = revokePermissionInput.trim();
+    if (!permission) {
+      return;
+    }
+    setUpdating(true);
+    setError(null);
+    try {
+      await api.revokeRolePermissions(runtime.chatId, roleId, [permission]);
+      setRevokePermissionInput("");
+      await load();
+    } catch (revokeError) {
+      setError(parseError(revokeError));
+    } finally {
+      setUpdating(false);
+    }
+  }
+
   async function handleSimulate(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     const permissions = simulationPerms
@@ -3332,6 +3725,8 @@ export function RolesAdminSection() {
       setUpdating(false);
     }
   }
+
+  const selectedRole = roles.find((entry) => entry.id === selectedRoleId) ?? null;
 
   if (state !== "ready" && state !== "updating") {
     return (
@@ -3367,6 +3762,96 @@ export function RolesAdminSection() {
             </div>
           </form>
 
+          <section className="panel-subcard">
+            <SectionTitle title="Role Editor" subtitle="Visual role/permission editor with presets." />
+            <div className="panel-form">
+              <label>
+                Role
+                <select value={selectedRoleId} onChange={(event) => setSelectedRoleId(event.target.value)}>
+                  {roles.map((role) => (
+                    <option key={role.id} value={role.id}>
+                      {role.name} (p{role.priority})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {selectedRole ? (
+                <>
+                  <label>
+                    Name
+                    <input value={editorName} onChange={(event) => setEditorName(event.target.value)} />
+                  </label>
+                  <label>
+                    Priority
+                    <input type="number" value={editorPriority} onChange={(event) => setEditorPriority(event.target.value)} />
+                  </label>
+                  <label className="panel-inline-check">
+                    <input
+                      type="checkbox"
+                      checked={editorIsDefault}
+                      onChange={(event) => setEditorIsDefault(event.target.checked)}
+                    />
+                    <span>Default role for new members</span>
+                  </label>
+                  <div className="panel-actions">
+                    <Button size="sm" variant="secondary" onClick={() => applyPermissionPreset("member_default")}>
+                      Preset: Member
+                    </Button>
+                    <Button size="sm" variant="secondary" onClick={() => applyPermissionPreset("moderator_core")}>
+                      Preset: Moderator
+                    </Button>
+                    <Button size="sm" variant="secondary" onClick={() => applyPermissionPreset("admin_core")}>
+                      Preset: Admin
+                    </Button>
+                    <Button size="sm" variant="secondary" onClick={() => applyPermissionPreset("owner_all")}>
+                      Preset: Owner
+                    </Button>
+                  </div>
+                  <div className="permission-grid">
+                    {ROLE_PERMISSION_GROUPS.map((group) => (
+                      <article key={group.label} className="permission-group-card">
+                        <header>
+                          <strong>{group.label}</strong>
+                        </header>
+                        <div className="permission-check-list">
+                          {group.permissions.map((permission) => (
+                            <label key={`${group.label}:${permission}`} className="panel-inline-check">
+                              <input
+                                type="checkbox"
+                                checked={editorPermissions.includes(permission) || editorPermissions.includes("*")}
+                                onChange={() => toggleEditorPermission(permission)}
+                                disabled={editorPermissions.includes("*")}
+                              />
+                              <span>{permission}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                  <label>
+                    Manual permission list (comma-separated)
+                    <textarea
+                      rows={3}
+                      value={editorPermissions.join(",")}
+                      onChange={(event) => setEditorPermissions(csvList(event.target.value))}
+                    />
+                  </label>
+                  <div className="panel-actions">
+                    <Button type="button" onClick={() => void handleSaveSelectedRole()}>
+                      Save role
+                    </Button>
+                    <Button type="button" variant="secondary" onClick={() => void load()}>
+                      Reload
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <StateBlock state="empty" title="No roles found" description="Create a role first." />
+              )}
+            </div>
+          </section>
+
           {error ? <RestrictionHint message={error.message} variant="danger" /> : null}
 
           <div className="panel-list">
@@ -3383,14 +3868,28 @@ export function RolesAdminSection() {
                   <Button size="sm" variant="secondary" onClick={() => void handleUpdateRole(role)}>
                     Edit
                   </Button>
-                  <Button size="sm" variant="secondary" onClick={() => void handleGrant(role.id)}>
-                    Grant
-                  </Button>
-                  <Button size="sm" variant="secondary" onClick={() => void handleRevoke(role.id)}>
-                    Revoke
-                  </Button>
                   <Button size="sm" variant="secondary" onClick={() => void handleAssign(role.id)}>
                     Assign
+                  </Button>
+                </div>
+                <div className="panel-inline-form">
+                  <input
+                    placeholder="permission to grant"
+                    value={grantPermissionInput}
+                    onChange={(event) => setGrantPermissionInput(event.target.value)}
+                  />
+                  <Button size="sm" variant="secondary" onClick={() => void handleGrantFromInput(role.id)}>
+                    Grant
+                  </Button>
+                </div>
+                <div className="panel-inline-form">
+                  <input
+                    placeholder="permission to revoke"
+                    value={revokePermissionInput}
+                    onChange={(event) => setRevokePermissionInput(event.target.value)}
+                  />
+                  <Button size="sm" variant="secondary" onClick={() => void handleRevokeFromInput(role.id)}>
+                    Revoke
                   </Button>
                 </div>
               </article>
@@ -3594,6 +4093,8 @@ export function MembersAdminSection() {
   const [updating, setUpdating] = useState(false);
   const [error, setError] = useState<PanelError | null>(null);
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "readonly" | "muted" | "banned">("all");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [roleDraftByUserId, setRoleDraftByUserId] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
     setState("loading");
@@ -3602,6 +4103,9 @@ export function MembersAdminSection() {
       const [members, roleList] = await Promise.all([api.listMembers(runtime.chatId), api.listRoles(runtime.chatId).catch(() => [])]);
       setOverview(members);
       setRoles(roleList);
+      setRoleDraftByUserId(
+        Object.fromEntries(members.members.map((member) => [member.userId, member.roleId]))
+      );
       setState("ready");
     } catch (loadError) {
       const parsed = parseError(loadError);
@@ -3655,7 +4159,55 @@ export function MembersAdminSection() {
     }
   }
 
-  const visibleMembers = overview?.members.filter((member) => (statusFilter === "all" ? true : member.status === statusFilter)) ?? [];
+  async function handleSetRole(userId: string): Promise<void> {
+    const roleId = roleDraftByUserId[userId];
+    if (!roleId) {
+      setError({ message: "Select role first." });
+      return;
+    }
+    setUpdating(true);
+    setError(null);
+    try {
+      await api.assignRole(runtime.chatId, roleId, userId);
+      await load();
+    } catch (assignError) {
+      setError(parseError(assignError));
+    } finally {
+      setUpdating(false);
+    }
+  }
+
+  const members = overview?.members ?? [];
+  const statusCounts = useMemo(
+    () =>
+      members.reduce(
+        (acc, member) => {
+          acc[member.status] += 1;
+          return acc;
+        },
+        {
+          active: 0,
+          readonly: 0,
+          muted: 0,
+          banned: 0
+        }
+      ),
+    [members]
+  );
+
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const visibleMembers = members.filter((member) => {
+    if (statusFilter !== "all" && member.status !== statusFilter) {
+      return false;
+    }
+    if (!normalizedQuery) {
+      return true;
+    }
+    return (
+      member.userId.toLowerCase().includes(normalizedQuery) ||
+      member.roleName.toLowerCase().includes(normalizedQuery)
+    );
+  });
 
   if (state !== "ready" && state !== "updating") {
     return (
@@ -3670,6 +4222,24 @@ export function MembersAdminSection() {
       <StateBlock state={updating ? "updating" : "ready"}>
         <AdminPageScaffold title="Members and Moderation" subtitle="Connected to /members and moderation actions.">
           <AdminNavChips />
+          <div className="admin-stats-grid">
+            <article className="admin-stat-card">
+              <strong>{members.length}</strong>
+              <span>Total</span>
+            </article>
+            <article className="admin-stat-card">
+              <strong>{statusCounts.active}</strong>
+              <span>Active</span>
+            </article>
+            <article className="admin-stat-card">
+              <strong>{statusCounts.muted}</strong>
+              <span>Muted</span>
+            </article>
+            <article className="admin-stat-card">
+              <strong>{statusCounts.banned}</strong>
+              <span>Banned</span>
+            </article>
+          </div>
           <div className="panel-toolbar">
             <label>
               Status filter
@@ -3683,6 +4253,10 @@ export function MembersAdminSection() {
                 <option value="muted">muted</option>
                 <option value="banned">banned</option>
               </select>
+            </label>
+            <label>
+              Search user/role
+              <input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="user id or role..." />
             </label>
             <Button variant="secondary" onClick={() => void load()}>
               Refresh
@@ -3707,6 +4281,26 @@ export function MembersAdminSection() {
                     joined: {formatDateTime(member.joinedAt)}
                     {member.mutedUntil ? ` | muted until ${formatDateTime(member.mutedUntil)}` : ""}
                   </p>
+                  <div className="panel-inline-form">
+                    <select
+                      value={roleDraftByUserId[member.userId] ?? member.roleId}
+                      onChange={(event) =>
+                        setRoleDraftByUserId((prev) => ({
+                          ...prev,
+                          [member.userId]: event.target.value
+                        }))
+                      }
+                    >
+                      {roles.map((role) => (
+                        <option key={`${member.userId}:${role.id}`} value={role.id}>
+                          {role.name} (p{role.priority})
+                        </option>
+                      ))}
+                    </select>
+                    <Button size="sm" variant="secondary" onClick={() => void handleSetRole(member.userId)}>
+                      Set role
+                    </Button>
+                  </div>
                   <div className="panel-actions">
                     <Button
                       size="sm"
@@ -3788,7 +4382,7 @@ export function MembersAdminSection() {
                       Unban
                     </Button>
                     <Button size="sm" variant="secondary" onClick={() => void handleAssignRole(member.userId)}>
-                      Assign role
+                      Assign role (manual)
                     </Button>
                     <Button
                       size="sm"

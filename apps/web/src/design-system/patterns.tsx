@@ -90,7 +90,11 @@ export function ErrorSurface({
 export function RolePill({ role }: { role: string }) {
   const normalized = role.trim().toLowerCase();
   const variant =
-    normalized.includes("admin") ? "default" : normalized.includes("moderator") ? "warning" : "neutral";
+    normalized.includes("admin") || normalized.includes("owner") || normalized.includes("creator")
+      ? "default"
+      : normalized.includes("moderator")
+        ? "warning"
+        : "neutral";
   return <span className={cn("ds-role-pill", `ds-role-pill-${variant}`)}>{role}</span>;
 }
 
