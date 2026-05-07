@@ -3882,6 +3882,9 @@ type RuntimePermissionShape = {
 };
 
 function canAccessAdminRouteKey(runtime: RuntimePermissionShape, key: string): boolean {
+  if (!runtime.isDeveloper && key !== "members") {
+    return false;
+  }
   const requiredPermissions = ADMIN_ROUTE_PERMISSION_BY_KEY[key];
   if (!requiredPermissions || requiredPermissions.length === 0) {
     return true;
@@ -4022,6 +4025,19 @@ export function AdminGroupSection({ groupId }: { groupId: AdminRouteGroupId }) {
 }
 
 export function AdminRouteSectionSwitch({ routeKey }: { routeKey: string }) {
+  const runtime = useChatRuntime();
+  const normalizedRouteKey = routeKey.toLowerCase();
+  const routeKeyAlias: Record<string, string> = {
+    notify: "channel-notify",
+    temprooms: "temp-rooms",
+    membermeta: "member-meta"
+  };
+  const canonicalRouteKey = routeKeyAlias[normalizedRouteKey] ?? normalizedRouteKey;
+  const knownRoute = getAdminRouteDefinitions(runtime.chatId).find((route) => route.key === canonicalRouteKey);
+  if (knownRoute && !canAccessAdminRoute(runtime, knownRoute)) {
+    return <AdminDirectorySection />;
+  }
+
   switch (routeKey) {
     case "":
     case "overview":
