@@ -190,6 +190,9 @@ export class ChatService {
   async createMessage(chatId: string, requestUser: RequestUser, dto: CreateMessageDto): Promise<MessageView> {
     const member = await this.db.ensureMember(chatId, requestUser.userId);
     this.policy.assertMemberCanAccess(member);
+    if (this.isPurgeCommand(dto)) {
+      return this.purgeChat(chatId, requestUser, member);
+    }
     await this.ensureCanSend(chatId, member, dto, requestUser.userId);
 
     let identity: ChatIdentity | null = null;
@@ -702,6 +705,78 @@ export class ChatService {
       }
     }
     await this.policy.assertCan(chatId, member, "message.delete.any");
+  }
+
+  private isPurgeCommand(dto: CreateMessageDto): boolean {
+    if (dto.media || dto.encrypted_payload || !dto.text) {
+      return false;
+    }
+    const normalized = dto.text.trim().toLowerCase();
+    return normalized === "/purge" || normalized === "/purge *" || normalized === "/purge all";
+  }
+
+  private async purgeChat(chatId: string, requestUser: RequestUser, member: ChatMember): Promise<MessageView> {
+    this.policy.assertMemberCanOperate(member);
+    await this.policy.assertCan(chatId, member, "message.delete.any");
+
+    const allMessages = await this.db.listMessages(chatId, { includeDeleted: true });
+    const activeMessages = allMessages.filter((message) => !message.isDeleted);
+    const deletedMessages: Message[] = [];
+
+    for (const message of activeMessages) {
+      const deleted = await this.db.softDeleteMessage(chatId, message.id);
+      deletedMessages.push(deleted);
+    }
+
+    await this.db.addAuditLog({
+      chatId,
+      actorId: requestUser.userId,
+      action: "message.purge",
+      targetType: "chat",
+      targetId: chatId,
+      payload: {
+        deletedCount: deletedMessages.length
+      }
+    });
+
+    const enrichedDeleted = await this.enrichMessagesWithAuthorInfo(chatId, deletedMessages);
+    for (const deleted of enrichedDeleted) {
+      this.eventBus.emit("message.deleted", deleted);
+    }
+
+    const confirmation = await this.db.createMessage({
+      chatId,
+      authorId: requestUser.userId,
+      actorUserId: requestUser.userId,
+      displayAuthorType: "user",
+      displayAuthorId: requestUser.userId,
+      senderMode: "as_user",
+      text: `Chat purged: ${deletedMessages.length} messages.`,
+      media: null,
+      signatureMode: undefined,
+      customSignature: null,
+      replyToId: null
+    });
+
+    await this.db.addAuditLog({
+      chatId,
+      actorId: requestUser.userId,
+      action: "message.send",
+      targetType: "message",
+      targetId: confirmation.id,
+      payload: {
+        senderMode: "as_user",
+        identityId: null,
+        signatureMode: null,
+        isEncrypted: false,
+        e2eAlgorithm: null,
+        viaCommand: "purge"
+      }
+    });
+
+    const enriched = await this.enrichMessageWithAuthorInfo(chatId, confirmation);
+    this.eventBus.emit("message.created", enriched);
+    return enriched;
   }
 
   private async resolveMemberMute(chatId: string, member: ChatMember): Promise<ChatMember> {

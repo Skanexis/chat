@@ -2,7 +2,7 @@ import { ForbiddenException, UnauthorizedException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { JwtService } from "@nestjs/jwt";
 import { createHmac } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { InMemoryDatabase } from "../../core/in-memory-database.service.js";
 import { AuthReplayStoreService } from "./auth-replay-store.service.js";
@@ -20,7 +20,7 @@ function createAuthFixture(configOverrides: Record<string, string> = {}) {
   const db = new InMemoryDatabase();
   const replayStore = new AuthReplayStoreService(config);
   const authService = new AuthService(config, jwt, replayStore, db);
-  return { authService };
+  return { authService, db };
 }
 
 function buildTelegramInitData(input: {
@@ -59,6 +59,10 @@ function buildTelegramInitData(input: {
 }
 
 describe("AuthService Telegram initData validation", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("authenticates with valid signed initData", async () => {
     const { authService } = createAuthFixture();
     const initData = buildTelegramInitData({
@@ -180,5 +184,78 @@ describe("AuthService Telegram initData validation", () => {
 
     const session = await authService.authWithTelegram({ initData });
     await expect(authService.refreshSession({ refreshToken: session.accessToken })).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it("promotes Telegram channel administrators to Legit role on auth", async () => {
+    const { authService, db } = createAuthFixture({
+      TELEGRAM_ACCESS_CHAT_ID: "-1001234567890"
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        return {
+          ok: true,
+          json: async () => ({ ok: true, result: { status: "administrator" } })
+        } as any;
+      })
+    );
+
+    const initData = buildTelegramInitData({
+      botToken: "test-bot-token",
+      authDate: Math.floor(Date.now() / 1000),
+      queryId: "query-legit-promo-1",
+      user: {
+        id: 700007,
+        username: "telegram_admin_user"
+      }
+    });
+
+    const result = await authService.authWithTelegram({ initData });
+    const member = await db.getMember("main", result.user.id);
+    expect(member).toBeDefined();
+    const role = await db.getRole("main", member!.roleId);
+    expect(role.permissions).toContain("message.send.text");
+    expect(role.permissions).toContain("message.send.reply");
+    expect(role.permissions).toContain("message.edit.own");
+    expect(role.permissions).toContain("message.delete.own");
+  });
+
+  it("does not downgrade existing higher role when Telegram admin logs in", async () => {
+    const { authService, db } = createAuthFixture({
+      TELEGRAM_ACCESS_CHAT_ID: "-1001234567890"
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        return {
+          ok: true,
+          json: async () => ({ ok: true, result: { status: "creator" } })
+        } as any;
+      })
+    );
+
+    const seeded = await db.upsertTelegramUser({
+      telegramId: 700008,
+      username: "already_owner"
+    });
+    await db.ensureMember("main", seeded.id);
+    const roles = await db.listRoles("main");
+    const ownerRole = roles.find((role) => role.permissions.includes("*"));
+    expect(ownerRole).toBeDefined();
+    await db.updateMemberRole("main", seeded.id, ownerRole!.id);
+
+    const initData = buildTelegramInitData({
+      botToken: "test-bot-token",
+      authDate: Math.floor(Date.now() / 1000),
+      queryId: "query-legit-promo-2",
+      user: {
+        id: 700008,
+        username: "already_owner"
+      }
+    });
+
+    await authService.authWithTelegram({ initData });
+    const updatedMember = await db.getMember("main", seeded.id);
+    expect(updatedMember?.roleId).toBe(ownerRole!.id);
   });
 });

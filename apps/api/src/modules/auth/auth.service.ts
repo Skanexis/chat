@@ -6,7 +6,7 @@ import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { DATABASE_SERVICE } from "../../core/database.service.js";
 import type { DatabaseService } from "../../core/database.service.js";
 import { resolveJwtTokenMaxChars, resolveJwtVerifyOptions } from "../../core/jwt-config.js";
-import type { Chat, RequestUser, User } from "../../core/types.js";
+import type { Chat, ChatMember, RequestUser, Role, User } from "../../core/types.js";
 import { AuthReplayStoreService } from "./auth-replay-store.service.js";
 import type { RefreshSessionDto, TelegramAuthDto } from "./auth.dto.js";
 
@@ -30,6 +30,11 @@ type InitDataValidationResult = {
   replayToken: string | null;
   authDate: number | null;
   replayTtlSeconds: number;
+};
+
+type AccessChatMembershipResult = {
+  status: string;
+  isAdmin: boolean;
 };
 
 type AuthSessionResponse = {
@@ -67,7 +72,7 @@ export class AuthService {
     const validation = this.validateInitData(params, dto.initData);
 
     const tgUser = this.parseTelegramUser(params);
-    await this.assertTelegramAccessChatMembership(tgUser.id);
+    const membership = await this.assertTelegramAccessChatMembership(tgUser.id);
     if (validation.strictMode && validation.replayToken && validation.authDate !== null) {
       await this.assertInitDataNotReplayed(validation.replayToken, tgUser.id, validation.authDate, validation.replayTtlSeconds);
     }
@@ -80,7 +85,10 @@ export class AuthService {
     });
 
     const targetChatId = dto.chatId ?? "main";
-    const member = await this.db.ensureMember(targetChatId, user.id);
+    let member = await this.db.ensureMember(targetChatId, user.id);
+    if (membership?.isAdmin) {
+      member = await this.promoteTelegramAdminToLegit(targetChatId, member);
+    }
     await this.assertMaintenanceAccessPolicy(targetChatId, member.roleId);
 
     const requestUser: RequestUser = {
@@ -96,14 +104,14 @@ export class AuthService {
     };
   }
 
-  private async assertTelegramAccessChatMembership(telegramUserId: number): Promise<void> {
+  private async assertTelegramAccessChatMembership(telegramUserId: number): Promise<AccessChatMembershipResult | null> {
     const accessChatId = this.configService.get<string>("TELEGRAM_ACCESS_CHAT_ID")?.trim();
     if (!accessChatId) {
       const nodeEnv = (this.configService.get<string>("NODE_ENV") ?? "").trim().toLowerCase();
       if (nodeEnv === "production") {
         throw new ForbiddenException("Mini App access is disabled: TELEGRAM_ACCESS_CHAT_ID is not configured.");
       }
-      return;
+      return null;
     }
 
     const botToken = this.configService.get<string>("TELEGRAM_BOT_TOKEN")?.trim();
@@ -147,6 +155,44 @@ export class AuthService {
     if (!status || !allowedStatuses.has(status)) {
       throw new ForbiddenException("Mini App access denied: user is not a member of the required Telegram chat.");
     }
+    return {
+      status,
+      isAdmin: status === "creator" || status === "administrator"
+    };
+  }
+
+  private async promoteTelegramAdminToLegit(chatId: string, member: ChatMember): Promise<ChatMember> {
+    const roles = await this.db.listRoles(chatId);
+    const legitRole = this.resolveLegitRole(roles);
+    if (!legitRole || member.roleId === legitRole.id) {
+      return member;
+    }
+
+    const currentRole = roles.find((role) => role.id === member.roleId) ?? (await this.db.getRole(chatId, member.roleId));
+    if (currentRole.priority >= legitRole.priority) {
+      return member;
+    }
+
+    return this.db.updateMemberRole(chatId, member.userId, legitRole.id);
+  }
+
+  private resolveLegitRole(roles: Role[]): Role | undefined {
+    const bySystemId = roles.find((role) => role.id === "role_main_legit");
+    if (bySystemId) {
+      return bySystemId;
+    }
+
+    return roles.find((role) => {
+      const permissionSet = new Set(role.permissions);
+      return (
+        !permissionSet.has("*") &&
+        permissionSet.has("message.send.text") &&
+        permissionSet.has("message.send.reply") &&
+        permissionSet.has("message.edit.own") &&
+        permissionSet.has("message.delete.own") &&
+        permissionSet.has("message.react")
+      );
+    });
   }
 
   async refreshSession(dto: RefreshSessionDto): Promise<AuthSessionResponse> {

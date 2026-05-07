@@ -64,6 +64,84 @@ describe("ChatService message permission matrix", () => {
     await expect(chatService.deleteMessage("main", created.id, userA)).resolves.toMatchObject({ isDeleted: true });
   });
 
+  it("allows admin with message.delete.any to purge chat via /purge command", async () => {
+    const { db, chatService } = createChatServiceFixture();
+    const regularA = await makeRequestUser(db, 501003, "regular_a");
+    const regularB = await makeRequestUser(db, 501004, "regular_b");
+    const admin = await makeRequestUser(db, 501005, "admin_purger");
+    const senderRole = await db.createRole({
+      chatId: "main",
+      name: "sender_role_for_purge_test",
+      priority: 7000,
+      permissions: ["chat.view", "message.send.text"],
+      isDefault: false
+    });
+    await db.updateMemberRole("main", regularA.userId, senderRole.id);
+    await db.updateMemberRole("main", regularB.userId, senderRole.id);
+
+    await chatService.createMessage("main", regularA, {
+      sender_mode: "as_user",
+      text: "first message"
+    });
+    await chatService.createMessage("main", regularB, {
+      sender_mode: "as_user",
+      text: "second message"
+    });
+
+    const adminRole = await db.createRole({
+      chatId: "main",
+      name: "admin_purge_role",
+      priority: 9500,
+      permissions: ["chat.view", "message.send.text", "message.delete.any"],
+      isDefault: false
+    });
+    await db.updateMemberRole("main", admin.userId, adminRole.id);
+
+    const result = await chatService.createMessage("main", admin, {
+      sender_mode: "as_user",
+      text: "/purge"
+    });
+    expect(result.text).toContain("Chat purged:");
+
+    const all = await db.listMessages("main", { includeDeleted: true });
+    const active = all.filter((message) => !message.isDeleted);
+    const deleted = all.filter((message) => message.isDeleted);
+
+    expect(active.length).toBe(1);
+    expect(active[0]?.id).toBe(result.id);
+    expect(deleted.length).toBe(2);
+  });
+
+  it("denies /purge for role without message.delete.any", async () => {
+    const { db, chatService } = createChatServiceFixture();
+    const member = await makeRequestUser(db, 501006, "member_no_purge");
+    const another = await makeRequestUser(db, 501007, "another_member");
+    const senderRole = await db.createRole({
+      chatId: "main",
+      name: "sender_role_without_purge",
+      priority: 7100,
+      permissions: ["chat.view", "message.send.text"],
+      isDefault: false
+    });
+    await db.updateMemberRole("main", member.userId, senderRole.id);
+    await db.updateMemberRole("main", another.userId, senderRole.id);
+
+    await chatService.createMessage("main", another, {
+      sender_mode: "as_user",
+      text: "seed message"
+    });
+
+    await expect(
+      chatService.createMessage("main", member, {
+        sender_mode: "as_user",
+        text: "/purge *"
+      })
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    const all = await db.listMessages("main", { includeDeleted: true });
+    expect(all.filter((message) => !message.isDeleted).length).toBe(1);
+  });
+
   it("denies media and as_group for default member role", async () => {
     const { db, chatService } = createChatServiceFixture();
     const user = await makeRequestUser(db, 501101, "member_media");
