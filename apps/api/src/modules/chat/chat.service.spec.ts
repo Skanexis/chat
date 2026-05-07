@@ -64,11 +64,11 @@ describe("ChatService message permission matrix", () => {
     await expect(chatService.deleteMessage("main", created.id, userA)).resolves.toMatchObject({ isDeleted: true });
   });
 
-  it("allows admin with message.delete.any to purge chat via /purge command alias", async () => {
+  it("allows owner wildcard role to purge chat via /purge command alias", async () => {
     const { db, chatService } = createChatServiceFixture();
     const regularA = await makeRequestUser(db, 501003, "regular_a");
     const regularB = await makeRequestUser(db, 501004, "regular_b");
-    const admin = await makeRequestUser(db, 501005, "admin_purger");
+    const owner = await makeRequestUser(db, 501005, "owner_purger");
     const senderRole = await db.createRole({
       chatId: "main",
       name: "sender_role_for_purge_test",
@@ -88,16 +88,11 @@ describe("ChatService message permission matrix", () => {
       text: "second message"
     });
 
-    const adminRole = await db.createRole({
-      chatId: "main",
-      name: "admin_purge_role",
-      priority: 9500,
-      permissions: ["chat.view", "message.send.text", "message.delete.any"],
-      isDefault: false
-    });
-    await db.updateMemberRole("main", admin.userId, adminRole.id);
+    const ownerRole = (await db.listRoles("main")).find((entry) => entry.permissions.includes("*"));
+    expect(ownerRole).toBeDefined();
+    await db.updateMemberRole("main", owner.userId, ownerRole!.id);
 
-    const result = await chatService.createMessage("main", admin, {
+    const result = await chatService.createMessage("main", owner, {
       sender_mode: "as_user",
       text: "/pure"
     });
@@ -109,16 +104,16 @@ describe("ChatService message permission matrix", () => {
 
     expect(active.length).toBe(1);
     expect(active[0]?.id).toBe(result.id);
-    expect(deleted.length).toBe(2);
+    expect(deleted.length).toBe(0);
   });
 
-  it("denies /purge for role without message.delete.any", async () => {
+  it("denies /purge for non-owner even with message.delete.any", async () => {
     const { db, chatService } = createChatServiceFixture();
     const member = await makeRequestUser(db, 501006, "member_no_purge");
     const another = await makeRequestUser(db, 501007, "another_member");
     const senderRole = await db.createRole({
       chatId: "main",
-      name: "sender_role_without_purge",
+      name: "sender_role_without_owner_purge",
       priority: 7100,
       permissions: ["chat.view", "message.send.text"],
       isDefault: false
@@ -130,6 +125,15 @@ describe("ChatService message permission matrix", () => {
       sender_mode: "as_user",
       text: "seed message"
     });
+
+    const adminLikeRole = await db.createRole({
+      chatId: "main",
+      name: "admin_like_non_owner",
+      priority: 9200,
+      permissions: ["chat.view", "message.send.text", "message.delete.any"],
+      isDefault: false
+    });
+    await db.updateMemberRole("main", member.userId, adminLikeRole.id);
 
     await expect(
       chatService.createMessage("main", member, {

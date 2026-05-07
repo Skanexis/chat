@@ -723,16 +723,13 @@ export class ChatService {
 
   private async purgeChat(chatId: string, requestUser: RequestUser, member: ChatMember): Promise<MessageView> {
     this.policy.assertMemberCanAccess(member);
-    await this.policy.assertCan(chatId, member, "message.delete.any");
-
-    const allMessages = await this.db.listMessages(chatId, { includeDeleted: true });
-    const activeMessages = allMessages.filter((message) => !message.isDeleted);
-    const deletedMessages: Message[] = [];
-
-    for (const message of activeMessages) {
-      const deleted = await this.db.softDeleteMessage(chatId, message.id);
-      deletedMessages.push(deleted);
+    const role = await this.db.getRole(chatId, member.roleId);
+    const isOwnerRole = role.id === "role_main_owner" || (role.isSystem && role.permissions.includes("*"));
+    if (!isOwnerRole) {
+      throw new ForbiddenException("Only owner can purge chat.");
     }
+
+    const deletedMessageIds = await this.db.hardDeleteMessages(chatId);
 
     await this.db.addAuditLog({
       chatId,
@@ -741,14 +738,14 @@ export class ChatService {
       targetType: "chat",
       targetId: chatId,
       payload: {
-        deletedCount: deletedMessages.length
+        deletedCount: deletedMessageIds.length
       }
     });
 
-    const enrichedDeleted = await this.enrichMessagesWithAuthorInfo(chatId, deletedMessages);
-    for (const deleted of enrichedDeleted) {
-      this.eventBus.emit("message.deleted", deleted);
-    }
+    this.eventBus.emit("message.purged", {
+      chatId,
+      messageIds: deletedMessageIds
+    });
 
     const confirmation = await this.db.createMessage({
       chatId,
@@ -757,7 +754,7 @@ export class ChatService {
       displayAuthorType: "user",
       displayAuthorId: requestUser.userId,
       senderMode: "as_user",
-      text: `Chat purged: ${deletedMessages.length} messages.`,
+      text: `Chat purged: ${deletedMessageIds.length} messages.`,
       media: null,
       signatureMode: undefined,
       customSignature: null,

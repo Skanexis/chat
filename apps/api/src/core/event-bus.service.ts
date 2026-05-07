@@ -7,6 +7,10 @@ type DomainEvents = {
   "message.created": Message;
   "message.updated": Message;
   "message.deleted": Message;
+  "message.purged": {
+    chatId: string;
+    messageIds: string[];
+  };
   "message.reaction.updated": {
     chatId: string;
     messageId: string;

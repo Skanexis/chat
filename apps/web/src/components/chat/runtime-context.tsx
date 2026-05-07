@@ -388,6 +388,15 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
             invalidate("webhooks");
             setMessages((prev) => mergeMessage(prev, message));
           },
+          onMessagesPurged: (payload) => {
+            markWsEvent();
+            invalidate("webhooks");
+            if (!payload.messageIds || payload.messageIds.length === 0) {
+              return;
+            }
+            const removed = new Set(payload.messageIds);
+            setMessages((prev) => prev.filter((message) => !removed.has(message.id)));
+          },
           onMemberUpdated: (payload: WsMemberUpdatedPayload) => {
             markWsEvent();
             invalidate("invites");

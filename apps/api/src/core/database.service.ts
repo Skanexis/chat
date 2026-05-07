@@ -182,6 +182,7 @@ export interface DatabaseService {
   createMessage(message: Omit<Message, "id" | "createdAt" | "updatedAt" | "isDeleted">): Promise<Message>;
   updateMessage(chatId: string, messageId: string, patch: MessagePatch): Promise<Message>;
   softDeleteMessage(chatId: string, messageId: string): Promise<Message>;
+  hardDeleteMessages(chatId: string): Promise<string[]>;
   listMessageReactions(chatId: string, messageId: string): Promise<MessageReaction[]>;
   upsertMessageReaction(chatId: string, messageId: string, userId: string, reaction: string): Promise<MessageReaction>;
   deleteMessageReaction(chatId: string, messageId: string, userId: string): Promise<void>;

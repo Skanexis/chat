@@ -551,6 +551,53 @@ export class InMemoryDatabase implements DatabaseService {
     return updated;
   }
 
+  async hardDeleteMessages(chatId: string): Promise<string[]> {
+    const messageIds = Array.from(this.messages.values())
+      .filter((message) => message.chatId === chatId)
+      .map((message) => message.id);
+    if (messageIds.length === 0) {
+      return [];
+    }
+
+    const messageIdSet = new Set(messageIds);
+    for (const messageId of messageIds) {
+      this.messages.delete(messageId);
+    }
+
+    for (const [reactionId, reaction] of this.reactions.entries()) {
+      if (reaction.chatId === chatId && messageIdSet.has(reaction.messageId)) {
+        this.reactions.delete(reactionId);
+      }
+    }
+    for (const [translationId, translation] of this.messageTranslations.entries()) {
+      if (translation.chatId === chatId && messageIdSet.has(translation.messageId)) {
+        this.messageTranslations.delete(translationId);
+      }
+    }
+    for (const [readReceiptId, readReceipt] of this.readReceipts.entries()) {
+      if (readReceipt.chatId === chatId && messageIdSet.has(readReceipt.messageId)) {
+        this.readReceipts.delete(readReceiptId);
+      }
+    }
+    for (const [bookmarkId, bookmark] of this.bookmarks.entries()) {
+      if (bookmark.chatId === chatId && messageIdSet.has(bookmark.messageId)) {
+        this.bookmarks.delete(bookmarkId);
+      }
+    }
+    for (const [reminderId, reminder] of this.reminders.entries()) {
+      if (reminder.chatId === chatId && messageIdSet.has(reminder.messageId)) {
+        this.reminders.delete(reminderId);
+      }
+    }
+    for (const [subscriptionId, subscription] of this.threadSubscriptions.entries()) {
+      if (subscription.chatId === chatId && messageIdSet.has(subscription.messageId)) {
+        this.threadSubscriptions.delete(subscriptionId);
+      }
+    }
+
+    return messageIds;
+  }
+
   async listMessageReactions(chatId: string, messageId: string): Promise<MessageReaction[]> {
     await this.getMessage(chatId, messageId);
     return Array.from(this.reactions.values())

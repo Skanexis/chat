@@ -99,6 +99,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       })
     );
     this.detachListeners.push(
+      this.eventBus.on("message.purged", (payload) => this.server.to(`chat:${payload.chatId}`).emit("message.purged", payload))
+    );
+    this.detachListeners.push(
       this.eventBus.on("message.reaction.updated", (payload) =>
         this.server.to(`chat:${payload.chatId}`).emit("message.reaction.updated", payload)
       )

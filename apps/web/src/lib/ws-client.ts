@@ -27,6 +27,7 @@ type WsCallbacks = {
   onMessageCreated?: (message: ChatMessage) => void;
   onMessageUpdated?: (message: ChatMessage) => void;
   onMessageDeleted?: (message: ChatMessage) => void;
+  onMessagesPurged?: (payload: { chatId: string; messageIds: string[] }) => void;
   onMemberUpdated?: (payload: WsMemberUpdatedPayload) => void;
   onMemberBanned?: (payload: WsMemberBannedPayload) => void;
   onReactionUpdated?: (payload: WsReactionPayload) => void;
@@ -107,6 +108,7 @@ export function connectChatSocket(apiBaseUrl: string, token: string, chatId: str
   socket.on("message.created", (payload: ChatMessage) => callbacks.onMessageCreated?.(payload));
   socket.on("message.updated", (payload: ChatMessage) => callbacks.onMessageUpdated?.(payload));
   socket.on("message.deleted", (payload: ChatMessage) => callbacks.onMessageDeleted?.(payload));
+  socket.on("message.purged", (payload: { chatId: string; messageIds: string[] }) => callbacks.onMessagesPurged?.(payload));
   socket.on("member.updated", (payload: WsMemberUpdatedPayload) => callbacks.onMemberUpdated?.(payload));
   socket.on("member.banned", (payload: WsMemberBannedPayload) => callbacks.onMemberBanned?.(payload));
   socket.on("message.reaction.updated", (payload: WsReactionPayload) => callbacks.onReactionUpdated?.(payload));
