@@ -542,6 +542,7 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
     hasSenderPermission("message.send.as_group") && hasSenderPermission("message.send.as_group.profile.select");
   const canShowOwnRoleBadge = hasSenderPermission(ROLE_BADGE_PERMISSION);
   const canSendText = hasSenderPermission("message.send.text");
+  const canUsePurgeCommand = Boolean(chat && chat.member.status === "active" && !canSendText && canDeleteAnyMessages);
 
   useEffect(() => {
     if (senderMode === "as_group" && (!canUseGroupSender || !groupIdentity)) {
@@ -572,16 +573,18 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
     return options;
   }, [canUseGroupSender, canUseRoleProfileSender, groupIdentity, roleProfileIdentity]);
 
-  const canSend = chat?.member.status === "active" && canSendText;
+  const canSend = chat?.member.status === "active" && (canSendText || canDeleteAnyMessages);
   const restrictionText =
     chat?.member.status === "muted"
       ? "You are muted in this chat. Sending is temporarily disabled."
       : chat?.member.status === "readonly"
         ? "This room is read-only for your role."
-        : chat?.member.status === "banned"
+      : chat?.member.status === "banned"
           ? "You are banned from posting in this room."
-        : chat?.member.status === "active" && !canSendText
-          ? "Your role has read-only access with reactions only."
+        : canUsePurgeCommand
+          ? "Moderation mode: only /purge command is available for your role."
+          : chat?.member.status === "active" && !canSendText
+            ? "Your role has read-only access with reactions only."
           : !wsConnected
             ? "Realtime connection is restoring. Sending works, but live updates can be delayed."
             : null;
@@ -611,6 +614,13 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
     const text = draft.trim();
     if (!text) {
       return;
+    }
+    if (!canSendText && canDeleteAnyMessages) {
+      const normalized = text.toLowerCase();
+      if (normalized !== "/purge" && normalized !== "/purge *" && normalized !== "/purge all") {
+        setError({ message: "Only /purge command is allowed for your role.", statusCode: 403 });
+        return;
+      }
     }
     const identityId = resolveIdentityId();
     if (senderMode === "as_group" && !canUseGroupSender) {

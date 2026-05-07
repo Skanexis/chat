@@ -33,6 +33,7 @@ const MESSAGE_DELETED_VIEW_PERMISSION = "message.deleted.view";
 export class ChatService {
   private readonly antiAbuseWindowSeconds: number;
   private readonly allowedE2EMessageAlgorithms: Set<string>;
+  private readonly requireEncryptedMessages: boolean;
 
   constructor(
     @Inject(DATABASE_SERVICE) private readonly db: DatabaseService,
@@ -46,6 +47,8 @@ export class ChatService {
       this.configService.get<string>("E2E_ALLOWED_MESSAGE_ALGORITHMS"),
       ["xchacha20-poly1305", "aes-256-gcm"]
     );
+    this.requireEncryptedMessages =
+      (this.configService.get<string>("CHAT_REQUIRE_ENCRYPTED_MESSAGES", "false") ?? "false").toLowerCase() === "true";
   }
 
   async getChat(chatId: string, requestUser: RequestUser) {
@@ -613,6 +616,9 @@ export class ChatService {
     }
     if (hasPlainPayload && hasEncryptedPayload) {
       throw new BadRequestException("encrypted_payload cannot be combined with text/media.");
+    }
+    if (this.requireEncryptedMessages && !hasEncryptedPayload) {
+      throw new ForbiddenException("Encrypted-only mode is enabled. Plain text/media messages are not allowed.");
     }
 
     if (normalizedMember.status === "banned") {

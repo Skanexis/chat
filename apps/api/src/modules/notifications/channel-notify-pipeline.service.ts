@@ -14,13 +14,17 @@ export class ChannelNotifyPipelineService implements OnModuleInit, OnModuleDestr
   private detachMessageListener?: () => void;
   private readonly digestBuffers = new Map<string, Message[]>();
   private readonly digestTimers = new Map<string, NodeJS.Timeout>();
+  private readonly redactMessageContentInNotify: boolean;
 
   constructor(
     @Inject(DATABASE_SERVICE) private readonly db: DatabaseService,
     private readonly eventBus: EventBusService,
     private readonly botService: TelegramBotService,
     private readonly configService: ConfigService
-  ) {}
+  ) {
+    this.redactMessageContentInNotify =
+      (this.configService.get<string>("CHANNEL_NOTIFY_REDACT_MESSAGE_CONTENT", "true") ?? "true").toLowerCase() === "true";
+  }
 
   onModuleInit(): void {
     this.detachMessageListener = this.eventBus.on("message.created", (message) => {
@@ -103,7 +107,7 @@ export class ChannelNotifyPipelineService implements OnModuleInit, OnModuleDestr
     const lines = await Promise.all(
       limited.map(async (message) => {
         const author = await this.resolveAuthorName(message);
-        return `- ${author}: ${buildMessagePreview(message, 100)}`;
+        return `- ${author}: ${this.buildNotifyMessageSummary(message)}`;
       })
     );
 
@@ -169,10 +173,27 @@ export class ChannelNotifyPipelineService implements OnModuleInit, OnModuleDestr
         return message.authorId;
       }
       const fullName = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
-      return user.username ?? (fullName || message.authorId);
+      if (user.username && user.username.trim().length > 0) {
+        const normalized = user.username.replace(/^@+/, "").trim();
+        return normalized.length > 0 ? `@${normalized}` : (fullName || message.authorId);
+      }
+      return fullName || message.authorId;
     } catch {
       return message.authorId;
     }
+  }
+
+  private buildNotifyMessageSummary(message: Message): string {
+    if (this.redactMessageContentInNotify) {
+      if (message.isEncrypted) {
+        return "[encrypted message]";
+      }
+      if (message.media) {
+        return "[media message]";
+      }
+      return "[message content hidden]";
+    }
+    return buildMessagePreview(message, 100);
   }
 
   private isQuietHoursNow(): boolean {

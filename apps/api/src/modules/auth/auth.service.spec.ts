@@ -258,4 +258,41 @@ describe("AuthService Telegram initData validation", () => {
     const updatedMember = await db.getMember("main", seeded.id);
     expect(updatedMember?.roleId).toBe(ownerRole!.id);
   });
+
+  it("promotes to Legit on refresh when Telegram status becomes administrator", async () => {
+    const { authService, db } = createAuthFixture({
+      TELEGRAM_ACCESS_CHAT_ID: "-1001234567890"
+    });
+    const fetchMock = vi.fn();
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ ok: true, result: { status: "member" } })
+    } as any);
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ ok: true, result: { status: "administrator" } })
+    } as any);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const initData = buildTelegramInitData({
+      botToken: "test-bot-token",
+      authDate: Math.floor(Date.now() / 1000),
+      queryId: "query-refresh-legit-1",
+      user: {
+        id: 700009,
+        username: "refresh_legit_user"
+      }
+    });
+
+    const firstSession = await authService.authWithTelegram({ initData });
+    const beforeRefreshMember = await db.getMember("main", firstSession.user.id);
+    const beforeRefreshRole = await db.getRole("main", beforeRefreshMember!.roleId);
+    expect(beforeRefreshRole.name).toBe("member");
+
+    await authService.refreshSession({ refreshToken: firstSession.refreshToken });
+    const afterRefreshMember = await db.getMember("main", firstSession.user.id);
+    const afterRefreshRole = await db.getRole("main", afterRefreshMember!.roleId);
+    expect(afterRefreshRole.permissions).toContain("message.send.text");
+    expect(afterRefreshRole.permissions).toContain("message.send.reply");
+  });
 });

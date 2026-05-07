@@ -775,6 +775,44 @@ describe("ChatService message permission matrix", () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
+  it("enforces encrypted-only mode when CHAT_REQUIRE_ENCRYPTED_MESSAGES=true", async () => {
+    process.env.CHAT_REQUIRE_ENCRYPTED_MESSAGES = "true";
+
+    const { db, chatService } = createChatServiceFixture();
+    const user = await makeRequestUser(db, 502505, "e2e_only_mode");
+    const senderRole = await db.createRole({
+      chatId: "main",
+      name: "e2e_only_sender",
+      priority: 7200,
+      permissions: ["chat.view", "message.send.text"],
+      isDefault: false
+    });
+    await db.updateMemberRole("main", user.userId, senderRole.id);
+
+    await expect(
+      chatService.createMessage("main", user, {
+        sender_mode: "as_user",
+        text: "plaintext should fail"
+      })
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    await expect(
+      chatService.createMessage("main", user, {
+        sender_mode: "as_user",
+        encrypted_payload: {
+          version: "1",
+          algorithm: "xchacha20-poly1305",
+          ciphertext: "YWJjMTIzX2NpcGhlcnRleHQ",
+          nonce: "bm9uY2UxMjM0NTY"
+        }
+      })
+    ).resolves.toMatchObject({
+      isEncrypted: true
+    });
+
+    delete process.env.CHAT_REQUIRE_ENCRYPTED_MESSAGES;
+  });
+
   it("blocks duplicate encrypted payload replay within duplicate window", async () => {
     process.env.CHAT_DUPLICATE_THRESHOLD = "2";
     process.env.CHAT_DUPLICATE_WINDOW_SECONDS = "300";

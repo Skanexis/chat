@@ -208,6 +208,11 @@ export class AuthService {
     if (!user || user.telegramId !== payload.telegramId) {
       throw new UnauthorizedException("Refresh token subject is invalid.");
     }
+    const membership = await this.assertTelegramAccessChatMembership(user.telegramId);
+    if (membership?.isAdmin) {
+      const refreshedMember = await this.db.ensureMember("main", user.id);
+      await this.promoteTelegramAdminToLegit("main", refreshedMember);
+    }
 
     const tokens = this.issueTokens({
       userId: user.id,
