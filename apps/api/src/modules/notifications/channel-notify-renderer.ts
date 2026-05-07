@@ -25,3 +25,7 @@ export function buildMessagePreview(message: Pick<Message, "text" | "media">, ma
   }
   return "[empty message]";
 }
+
+export function buildInstantChannelNotifyText(authorName: string): string {
+  return `${authorName} posted a new message.\nTap the button below to view.`;
+}

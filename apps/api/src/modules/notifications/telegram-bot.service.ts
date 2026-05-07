@@ -10,13 +10,17 @@ type TelegramSendResult = {
   responseBody?: unknown;
 };
 
+type SendChannelMessageOptions = {
+  chatId?: string;
+};
+
 @Injectable()
 export class TelegramBotService {
   private readonly logger = new Logger(TelegramBotService.name);
 
   constructor(private readonly configService: ConfigService) {}
 
-  async sendChannelMessage(text: string): Promise<TelegramSendResult> {
+  async sendChannelMessage(text: string, options: SendChannelMessageOptions = {}): Promise<TelegramSendResult> {
     const botToken = this.configService.get<string>("TELEGRAM_BOT_TOKEN");
     const channelId = this.configService.get<string>("TELEGRAM_NOTIFY_CHANNEL_ID");
     if (!botToken || !channelId) {
@@ -31,13 +35,20 @@ export class TelegramBotService {
     const apiUrl = `https://api.telegram.org/bot${botToken}/sendMessage`;
     const retryAttempts = this.parsePositiveInt(this.configService.get<string>("TELEGRAM_NOTIFY_RETRY_ATTEMPTS"), 3);
     const timeoutMs = this.parsePositiveInt(this.configService.get<string>("TELEGRAM_NOTIFY_TIMEOUT_MS"), 8000);
+    const miniAppUrl = this.resolveMiniAppUrl(options.chatId);
+    const payload: Record<string, unknown> = {
+      chat_id: channelId,
+      text,
+      disable_web_page_preview: true
+    };
+    if (miniAppUrl) {
+      payload.reply_markup = {
+        inline_keyboard: [[{ text: "Open Mini App Chat", url: miniAppUrl }]]
+      };
+    }
 
     for (let attempt = 1; attempt <= retryAttempts; attempt++) {
-      const response = await this.postWithTimeout(apiUrl, timeoutMs, {
-        chat_id: channelId,
-        text,
-        disable_web_page_preview: true
-      });
+      const response = await this.postWithTimeout(apiUrl, timeoutMs, payload);
 
       if (!response) {
         if (attempt === retryAttempts) {
@@ -114,6 +125,22 @@ export class TelegramBotService {
     }
     const record = body as Record<string, unknown>;
     return record.ok === true;
+  }
+
+  private resolveMiniAppUrl(chatId: string | undefined): string | null {
+    const explicitUrl = this.configService.get<string>("TELEGRAM_MINI_APP_URL")?.trim();
+    if (explicitUrl) {
+      return explicitUrl;
+    }
+
+    const botUsername = this.configService.get<string>("TELEGRAM_BOT_USERNAME")?.trim().replace(/^@/, "");
+    if (!botUsername) {
+      return null;
+    }
+
+    const startAppRaw = this.configService.get<string>("TELEGRAM_MINI_APP_STARTAPP")?.trim();
+    const startApp = startAppRaw && startAppRaw.length > 0 ? startAppRaw : (chatId?.trim() || "main");
+    return `https://t.me/${botUsername}?startapp=${encodeURIComponent(startApp)}`;
   }
 
   private parsePositiveInt(raw: string | undefined, fallback: number): number {

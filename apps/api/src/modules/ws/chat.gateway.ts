@@ -83,13 +83,19 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     };
 
     this.detachListeners.push(
-      this.eventBus.on("message.created", (payload) => this.server.to(`chat:${payload.chatId}`).emit("message.created", payload))
+      this.eventBus.on("message.created", (payload) => {
+        void this.broadcastMessageEventForRoom("message.created", payload);
+      })
     );
     this.detachListeners.push(
-      this.eventBus.on("message.updated", (payload) => this.server.to(`chat:${payload.chatId}`).emit("message.updated", payload))
+      this.eventBus.on("message.updated", (payload) => {
+        void this.broadcastMessageEventForRoom("message.updated", payload);
+      })
     );
     this.detachListeners.push(
-      this.eventBus.on("message.deleted", (payload) => this.server.to(`chat:${payload.chatId}`).emit("message.deleted", payload))
+      this.eventBus.on("message.deleted", (payload) => {
+        void this.broadcastMessageEventForRoom("message.deleted", payload);
+      })
     );
     this.detachListeners.push(
       this.eventBus.on("message.reaction.updated", (payload) =>
@@ -280,6 +286,30 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       throw new UnauthorizedException("Unauthorized websocket client.");
     }
     return client.data.user;
+  }
+
+  private async broadcastMessageEventForRoom(
+    eventName: "message.created" | "message.updated" | "message.deleted",
+    payload: Awaited<ReturnType<ChatService["deleteMessage"]>>
+  ): Promise<void> {
+    const roomId = `chat:${payload.chatId}`;
+    const room = this.server.sockets.adapter.rooms.get(roomId);
+    if (!room || room.size === 0) {
+      return;
+    }
+
+    await Promise.all(
+      Array.from(room).map(async (socketId) => {
+        const socket = this.server.sockets.sockets.get(socketId) as ClientSocket | undefined;
+        const user = socket?.data.user;
+        if (!socket || !user) {
+          return;
+        }
+
+        const sanitized = await this.chatService.sanitizeDeletedMessageForUser(payload.chatId, user, payload);
+        socket.emit(eventName, sanitized);
+      })
+    );
   }
 
   private parsePositiveIntConfig(rawValue: string | undefined, fallback: number): number {

@@ -27,6 +27,7 @@ type MessageView = Message & {
 };
 
 const ROLE_BADGE_PERMISSION = "ui.role.badge.show";
+const MESSAGE_DELETED_VIEW_PERMISSION = "message.deleted.view";
 
 @Injectable()
 export class ChatService {
@@ -52,7 +53,7 @@ export class ChatService {
     this.policy.assertMemberCanAccess(member);
     await this.policy.assertCan(chatId, member, "chat.view");
     const role = await this.db.getRole(chatId, member.roleId);
-    await this.assertMaintenanceAccess(chatId, role.name);
+    await this.assertMaintenanceAccess(chatId, role.permissions);
     return {
       ...(await this.db.getChat(chatId)),
       member: {
@@ -296,7 +297,7 @@ export class ChatService {
     });
     const enriched = await this.enrichMessageWithAuthorInfo(chatId, deleted);
     this.eventBus.emit("message.deleted", enriched);
-    return enriched;
+    return this.sanitizeDeletedMessageForMember(chatId, member, enriched);
   }
 
   async pinMessage(chatId: string, messageId: string, requestUser: RequestUser): Promise<{ ok: true; messageId: string; pinnedAt: string }> {
@@ -708,19 +709,19 @@ export class ChatService {
     return this.db.updateMemberStatus(chatId, member.userId, member.status === "muted" ? "active" : member.status, null);
   }
 
-  private async assertMaintenanceAccess(chatId: string, roleName: string): Promise<void> {
+  private async assertMaintenanceAccess(chatId: string, rolePermissions: string[]): Promise<void> {
     const active = await this.db.getActiveIncidentMode(chatId);
     if (!active) {
       return;
     }
-    const normalizedRole = roleName.trim().toLowerCase();
+    const permissionSet = new Set(rolePermissions);
     const isBypassRole =
-      normalizedRole.includes("owner") ||
-      normalizedRole.includes("creator") ||
-      normalizedRole.includes("administrator") ||
-      normalizedRole.includes("admin");
+      permissionSet.has("*") ||
+      (permissionSet.has("incident_mode.enable") && permissionSet.has("incident_mode.disable"));
     if (!isBypassRole) {
-      throw new ForbiddenException("Maintenance mode is active. Access is temporarily limited to owner/administrator.");
+      throw new ForbiddenException(
+        "Maintenance mode is active. Access is temporarily limited to roles with maintenance permissions."
+      );
     }
   }
 
@@ -837,6 +838,44 @@ export class ChatService {
   private async enrichMessageWithAuthorInfo(chatId: string, message: Message): Promise<MessageView> {
     const [enriched] = await this.enrichMessagesWithAuthorInfo(chatId, [message]);
     return enriched ?? message;
+  }
+
+  async sanitizeDeletedMessageForUser(chatId: string, requestUser: RequestUser, message: MessageView): Promise<MessageView> {
+    if (!message.isDeleted) {
+      return message;
+    }
+
+    const member = await this.db.getMember(chatId, requestUser.userId);
+    if (!member) {
+      return this.maskDeletedMessageContent(message);
+    }
+
+    return this.sanitizeDeletedMessageForMember(chatId, member, message);
+  }
+
+  private async sanitizeDeletedMessageForMember(chatId: string, member: ChatMember, message: MessageView): Promise<MessageView> {
+    if (!message.isDeleted) {
+      return message;
+    }
+    const canViewDeletedContent = await this.policy.hasPermission(chatId, member, MESSAGE_DELETED_VIEW_PERMISSION);
+    if (canViewDeletedContent) {
+      return message;
+    }
+    return this.maskDeletedMessageContent(message);
+  }
+
+  private maskDeletedMessageContent(message: MessageView): MessageView {
+    if (!message.isDeleted) {
+      return message;
+    }
+
+    return {
+      ...message,
+      text: undefined,
+      media: null,
+      customSignature: null,
+      encryptedPayload: null
+    };
   }
 
   private async enrichMessagesWithAuthorInfo(chatId: string, messages: Message[]): Promise<MessageView[]> {

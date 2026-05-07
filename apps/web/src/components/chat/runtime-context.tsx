@@ -77,6 +77,8 @@ type ChatRuntimeValue = {
   roleName: string;
   isAdmin: boolean;
   isModerator: boolean;
+  canDeleteAnyMessages: boolean;
+  canViewDeletedMessages: boolean;
   canSend: boolean;
   restrictionText: string | null;
   senderOptions: Array<{ value: SenderModeValue; label: string; disabled?: boolean }>;
@@ -171,32 +173,40 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
   const currentUserId = session?.user.id ?? null;
   const roleName = chat?.member.role.name ?? "member";
   const rolePermissions = chat?.member.role.permissions ?? [];
+  const permissionSet = useMemo(() => new Set(rolePermissions), [rolePermissions]);
   const normalizedRole = roleName.toLowerCase();
   const isOwnerLike = normalizedRole.includes("owner") || normalizedRole.includes("creator");
   const isMaintenanceBypass =
-    normalizedRole.includes("owner") || normalizedRole.includes("creator") || normalizedRole.includes("administrator") || normalizedRole.includes("admin");
+    permissionSet.has("*") || (permissionSet.has("incident_mode.enable") && permissionSet.has("incident_mode.disable"));
   const isAdminByName = normalizedRole.includes("admin") || isOwnerLike;
-  const isAdminByPermission = rolePermissions.some((permission) =>
-    permission.startsWith("role.") ||
-    permission.startsWith("invite.") ||
-    permission.startsWith("channel_notify.") ||
-    permission.startsWith("broadcast.") ||
-    permission.startsWith("webhook.") ||
-    permission.startsWith("automation.") ||
-    permission.startsWith("incident_mode.") ||
-    permission.startsWith("audit.")
-  );
+  const isAdminByPermission =
+    permissionSet.has("*") ||
+    rolePermissions.some((permission) =>
+      permission.startsWith("role.") ||
+      permission.startsWith("invite.") ||
+      permission.startsWith("channel_notify.") ||
+      permission.startsWith("broadcast.") ||
+      permission.startsWith("webhook.") ||
+      permission.startsWith("automation.") ||
+      permission.startsWith("incident_mode.") ||
+      permission.startsWith("audit.")
+    );
   const isModeratorByName = normalizedRole.includes("moderator");
-  const isModeratorByPermission = rolePermissions.some((permission) =>
-    permission.startsWith("member.") ||
-    permission.startsWith("ticket.") ||
-    permission.startsWith("temp_room.") ||
-    permission === "message.search" ||
-    permission === "message.pin" ||
-    permission === "message.pin.view"
-  );
+  const isModeratorByPermission =
+    permissionSet.has("*") ||
+    rolePermissions.some((permission) =>
+      permission.startsWith("member.") ||
+      permission.startsWith("ticket.") ||
+      permission.startsWith("temp_room.") ||
+      permission === "message.search" ||
+      permission === "message.pin" ||
+      permission === "message.pin.view"
+    );
   const isAdmin = isAdminByName || isAdminByPermission;
   const isModerator = isAdmin || isModeratorByName || isModeratorByPermission;
+  const canDeleteAnyMessages = permissionSet.has("*") || permissionSet.has("message.delete.any");
+  const canViewDeletedMessages =
+    permissionSet.has("*") || permissionSet.has("message.deleted.view") || permissionSet.has("message.delete.any");
   const maintenanceEnabled = maintenanceState !== null;
   const maintenanceReason = maintenanceState?.reason ?? liveIncidentMode?.reason ?? null;
 
@@ -315,15 +325,41 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
             invalidate("webhooks");
             setMessages((prev) => mergeMessage(prev, message));
           },
-          onMemberUpdated: (_payload: WsMemberUpdatedPayload) => {
+          onMemberUpdated: (payload: WsMemberUpdatedPayload) => {
             markWsEvent();
             invalidate("invites");
             invalidate("webhooks");
+            if (payload.userId === currentUserIdRef.current) {
+              setChat((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      member: {
+                        ...prev.member,
+                        status: payload.status
+                      }
+                    }
+                  : prev
+              );
+            }
           },
-          onMemberBanned: (_payload: WsMemberBannedPayload) => {
+          onMemberBanned: (payload: WsMemberBannedPayload) => {
             markWsEvent();
             invalidate("invites");
             invalidate("webhooks");
+            if (payload.userId === currentUserIdRef.current) {
+              setChat((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      member: {
+                        ...prev.member,
+                        status: payload.status
+                      }
+                    }
+                  : prev
+              );
+            }
           },
           onReactionUpdated: (payload) => {
             markWsEvent();
@@ -437,6 +473,7 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
   const canUseRoleProfileSender =
     hasSenderPermission("message.send.as_group") && hasSenderPermission("message.send.as_group.profile.select");
   const canShowOwnRoleBadge = hasSenderPermission(ROLE_BADGE_PERMISSION);
+  const canSendText = hasSenderPermission("message.send.text");
 
   useEffect(() => {
     if (senderMode === "as_group" && (!canUseGroupSender || !groupIdentity)) {
@@ -467,7 +504,7 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
     return options;
   }, [canUseGroupSender, canUseRoleProfileSender, groupIdentity, roleProfileIdentity]);
 
-  const canSend = chat?.member.status === "active";
+  const canSend = chat?.member.status === "active" && canSendText;
   const restrictionText =
     chat?.member.status === "muted"
       ? "You are muted in this chat. Sending is temporarily disabled."
@@ -475,6 +512,8 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
         ? "This room is read-only for your role."
         : chat?.member.status === "banned"
           ? "You are banned from posting in this room."
+          : chat?.member.status === "active" && !canSendText
+            ? "Your role has read-only access with reactions only."
           : null;
 
   function applyBootstrap(bootstrap: BootstrapResponse): void {
@@ -677,6 +716,8 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
       roleName,
       isAdmin,
       isModerator,
+      canDeleteAnyMessages,
+      canViewDeletedMessages,
       canSend,
       restrictionText,
       senderOptions,
@@ -704,6 +745,8 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
       identities,
       isAdmin,
       isModerator,
+      canDeleteAnyMessages,
+      canViewDeletedMessages,
       liveAutomationExecutions,
       liveBroadcastDeliveryByCampaignId,
       liveBroadcastStateByCampaignId,

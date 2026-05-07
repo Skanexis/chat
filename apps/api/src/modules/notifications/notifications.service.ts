@@ -4,7 +4,7 @@ import { DATABASE_SERVICE } from "../../core/database.service.js";
 import type { DatabaseService } from "../../core/database.service.js";
 import { PolicyService } from "../../core/policy.service.js";
 import type { RequestUser } from "../../core/types.js";
-import { buildMessagePreview, renderChannelNotifyTemplate } from "./channel-notify-renderer.js";
+import { buildInstantChannelNotifyText, buildMessagePreview, renderChannelNotifyTemplate } from "./channel-notify-renderer.js";
 import { TestChannelNotifyDto, UpdateChannelNotifyConfigDto } from "./notifications.dto.js";
 import { TelegramBotService } from "./telegram-bot.service.js";
 
@@ -55,13 +55,16 @@ export class NotificationsService {
 
     const config = await this.db.getChannelNotifyConfig(chatId);
     const chat = await this.db.getChat(chatId);
-    const rendered = renderChannelNotifyTemplate({
-      template: config.template,
-      chatName: chat.name,
-      authorName: requestUser.userId,
-      messagePreview: buildMessagePreview({ text: dto.messagePreview ?? "Test notification", media: null }),
-      timestamp: new Date().toISOString()
-    });
+    const rendered =
+      config.mode === "instant"
+        ? buildInstantChannelNotifyText(requestUser.userId)
+        : renderChannelNotifyTemplate({
+            template: config.template,
+            chatName: chat.name,
+            authorName: requestUser.userId,
+            messagePreview: buildMessagePreview({ text: dto.messagePreview ?? "Test notification", media: null }),
+            timestamp: new Date().toISOString()
+          });
 
     let delivery: {
       requested: boolean;
@@ -72,7 +75,7 @@ export class NotificationsService {
     } | null = null;
 
     if (dto.deliver === true) {
-      const result = await this.botService.sendChannelMessage(rendered);
+      const result = await this.botService.sendChannelMessage(rendered, { chatId });
       delivery = {
         requested: true,
         ok: result.ok,

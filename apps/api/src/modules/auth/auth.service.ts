@@ -353,14 +353,14 @@ export class AuthService {
     }
 
     const role = await this.db.getRole(chatId, roleId);
-    const normalizedRole = role.name.trim().toLowerCase();
+    const permissionSet = new Set(role.permissions);
     const isBypassRole =
-      normalizedRole.includes("owner") ||
-      normalizedRole.includes("creator") ||
-      normalizedRole.includes("administrator") ||
-      normalizedRole.includes("admin");
+      permissionSet.has("*") ||
+      (permissionSet.has("incident_mode.enable") && permissionSet.has("incident_mode.disable"));
     if (!isBypassRole) {
-      throw new ForbiddenException("Maintenance mode is active. Access is temporarily limited to owner/administrator.");
+      throw new ForbiddenException(
+        "Maintenance mode is active. Access is temporarily limited to roles with maintenance permissions."
+      );
     }
   }
 }

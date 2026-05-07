@@ -48,7 +48,7 @@ import type {
   ThreadSubscriptionPatch,
   TicketPatch
 } from "./database.service.js";
-import { BASE_ADMIN_PERMISSIONS, BASE_MEMBER_PERMISSIONS, BASE_OWNER_PERMISSIONS } from "./permissions.js";
+import { BASE_ADMIN_PERMISSIONS, BASE_LEGIT_PERMISSIONS, BASE_MEMBER_PERMISSIONS, BASE_OWNER_PERMISSIONS } from "./permissions.js";
 import { PrismaService } from "./prisma/prisma.service.js";
 import type {
   AutomationRule,
@@ -103,6 +103,7 @@ const MAIN_CHAT_ID = "main";
 const MAIN_OWNER_ROLE_ID = "role_main_owner";
 const MAIN_ADMIN_ROLE_ID = "role_main_admin";
 const MAIN_MEMBER_ROLE_ID = "role_main_member";
+const MAIN_LEGIT_ROLE_ID = "role_main_legit";
 const MAIN_READONLY_ROLE_ID = "role_main_readonly";
 const MAIN_IDENTITY_ID = "identity_main_group";
 
@@ -2358,90 +2359,227 @@ export class PrismaDatabaseService implements DatabaseService {
       where: { id: MAIN_CHAT_ID },
       select: { id: true }
     });
-    if (chatExists) {
-      return;
+    if (!chatExists) {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.chat.create({
+          data: {
+            id: MAIN_CHAT_ID,
+            name: "Ristoranti Chat",
+            mode: "chat_mode",
+            defaultRoleId: MAIN_MEMBER_ROLE_ID
+          }
+        });
+
+        await tx.role.createMany({
+          data: [
+            {
+              id: MAIN_OWNER_ROLE_ID,
+              chatId: MAIN_CHAT_ID,
+              name: "owner",
+              priority: 1000,
+              isSystem: true,
+              isDefault: false,
+              permissions: BASE_OWNER_PERMISSIONS
+            },
+            {
+              id: MAIN_ADMIN_ROLE_ID,
+              chatId: MAIN_CHAT_ID,
+              name: "admin",
+              priority: 900,
+              isSystem: true,
+              isDefault: false,
+              permissions: BASE_ADMIN_PERMISSIONS
+            },
+            {
+              id: MAIN_MEMBER_ROLE_ID,
+              chatId: MAIN_CHAT_ID,
+              name: "member",
+              priority: 100,
+              isSystem: true,
+              isDefault: true,
+              permissions: BASE_MEMBER_PERMISSIONS
+            },
+            {
+              id: MAIN_LEGIT_ROLE_ID,
+              chatId: MAIN_CHAT_ID,
+              name: "legit",
+              priority: 120,
+              isSystem: true,
+              isDefault: false,
+              permissions: BASE_LEGIT_PERMISSIONS
+            },
+            {
+              id: MAIN_READONLY_ROLE_ID,
+              chatId: MAIN_CHAT_ID,
+              name: "readonly",
+              priority: 10,
+              isSystem: true,
+              isDefault: false,
+              permissions: ["chat.view", "chat.join", "chat.leave"]
+            }
+          ]
+        });
+
+        await tx.roleLimit.createMany({
+          data: [
+            { roleId: MAIN_OWNER_ROLE_ID, chatId: MAIN_CHAT_ID },
+            { roleId: MAIN_ADMIN_ROLE_ID, chatId: MAIN_CHAT_ID },
+            { roleId: MAIN_MEMBER_ROLE_ID, chatId: MAIN_CHAT_ID },
+            {
+              roleId: MAIN_LEGIT_ROLE_ID,
+              chatId: MAIN_CHAT_ID,
+              messagesPerDay: 3,
+              exceedAction: PrismaLimitExceedAction.reject
+            },
+            { roleId: MAIN_READONLY_ROLE_ID, chatId: MAIN_CHAT_ID }
+          ]
+        });
+
+        await tx.chatIdentity.create({
+          data: {
+            id: MAIN_IDENTITY_ID,
+            chatId: MAIN_CHAT_ID,
+            name: "Ristoranti Chat Team",
+            type: "group",
+            isActive: true,
+            createdBy: "system"
+          }
+        });
+
+        await tx.channelNotifyConfig.create({
+          data: {
+            chatId: MAIN_CHAT_ID,
+            enabled: false,
+            mode: ChannelNotifyMode.off,
+            template: "{author_name} posted a new message.\nTap the button below to view.",
+            digestIntervalMinutes: 15,
+            updatedBy: "system"
+          }
+        });
+      });
     }
 
+    await this.ensureMainSystemRolesUpToDate();
+  }
+
+  private async ensureMainSystemRolesUpToDate(): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
-      await tx.chat.create({
-        data: {
-          id: MAIN_CHAT_ID,
-          name: "Ristoranti Chat",
-          mode: "chat_mode",
-          defaultRoleId: MAIN_MEMBER_ROLE_ID
-        }
-      });
-
-      await tx.role.createMany({
-        data: [
-          {
-            id: MAIN_OWNER_ROLE_ID,
-            chatId: MAIN_CHAT_ID,
-            name: "owner",
-            priority: 1000,
-            isSystem: true,
-            isDefault: false,
-            permissions: BASE_OWNER_PERMISSIONS
-          },
-          {
-            id: MAIN_ADMIN_ROLE_ID,
-            chatId: MAIN_CHAT_ID,
-            name: "admin",
-            priority: 900,
-            isSystem: true,
-            isDefault: false,
-            permissions: BASE_ADMIN_PERMISSIONS
-          },
-          {
-            id: MAIN_MEMBER_ROLE_ID,
-            chatId: MAIN_CHAT_ID,
-            name: "member",
-            priority: 100,
-            isSystem: true,
-            isDefault: true,
-            permissions: BASE_MEMBER_PERMISSIONS
-          },
-          {
-            id: MAIN_READONLY_ROLE_ID,
-            chatId: MAIN_CHAT_ID,
-            name: "readonly",
-            priority: 10,
-            isSystem: true,
-            isDefault: false,
-            permissions: ["chat.view", "chat.join", "chat.leave"]
-          }
-        ]
-      });
-
-      await tx.roleLimit.createMany({
-        data: [
-          { roleId: MAIN_OWNER_ROLE_ID, chatId: MAIN_CHAT_ID },
-          { roleId: MAIN_ADMIN_ROLE_ID, chatId: MAIN_CHAT_ID },
-          { roleId: MAIN_MEMBER_ROLE_ID, chatId: MAIN_CHAT_ID },
-          { roleId: MAIN_READONLY_ROLE_ID, chatId: MAIN_CHAT_ID }
-        ]
-      });
-
-      await tx.chatIdentity.create({
-        data: {
-          id: MAIN_IDENTITY_ID,
+      await tx.role.upsert({
+        where: { id: MAIN_OWNER_ROLE_ID },
+        create: {
+          id: MAIN_OWNER_ROLE_ID,
           chatId: MAIN_CHAT_ID,
-          name: "Ristoranti Chat Team",
-          type: "group",
-          isActive: true,
-          createdBy: "system"
+          name: "owner",
+          priority: 1000,
+          isSystem: true,
+          isDefault: false,
+          permissions: BASE_OWNER_PERMISSIONS
+        },
+        update: {
+          chatId: MAIN_CHAT_ID,
+          isSystem: true
+        }
+      });
+      await tx.role.upsert({
+        where: { id: MAIN_ADMIN_ROLE_ID },
+        create: {
+          id: MAIN_ADMIN_ROLE_ID,
+          chatId: MAIN_CHAT_ID,
+          name: "admin",
+          priority: 900,
+          isSystem: true,
+          isDefault: false,
+          permissions: BASE_ADMIN_PERMISSIONS
+        },
+        update: {
+          chatId: MAIN_CHAT_ID,
+          isSystem: true
+        }
+      });
+      await tx.role.upsert({
+        where: { id: MAIN_MEMBER_ROLE_ID },
+        create: {
+          id: MAIN_MEMBER_ROLE_ID,
+          chatId: MAIN_CHAT_ID,
+          name: "member",
+          priority: 100,
+          isSystem: true,
+          isDefault: true,
+          permissions: BASE_MEMBER_PERMISSIONS
+        },
+        update: {
+          chatId: MAIN_CHAT_ID,
+          isSystem: true,
+          permissions: BASE_MEMBER_PERMISSIONS
+        }
+      });
+      await tx.role.upsert({
+        where: { id: MAIN_LEGIT_ROLE_ID },
+        create: {
+          id: MAIN_LEGIT_ROLE_ID,
+          chatId: MAIN_CHAT_ID,
+          name: "legit",
+          priority: 120,
+          isSystem: true,
+          isDefault: false,
+          permissions: BASE_LEGIT_PERMISSIONS
+        },
+        update: {
+          chatId: MAIN_CHAT_ID,
+          isSystem: true,
+          permissions: BASE_LEGIT_PERMISSIONS
+        }
+      });
+      await tx.role.upsert({
+        where: { id: MAIN_READONLY_ROLE_ID },
+        create: {
+          id: MAIN_READONLY_ROLE_ID,
+          chatId: MAIN_CHAT_ID,
+          name: "readonly",
+          priority: 10,
+          isSystem: true,
+          isDefault: false,
+          permissions: ["chat.view", "chat.join", "chat.leave"]
+        },
+        update: {
+          chatId: MAIN_CHAT_ID,
+          isSystem: true
         }
       });
 
-      await tx.channelNotifyConfig.create({
-        data: {
+      await tx.roleLimit.upsert({
+        where: { roleId: MAIN_OWNER_ROLE_ID },
+        create: { roleId: MAIN_OWNER_ROLE_ID, chatId: MAIN_CHAT_ID },
+        update: { chatId: MAIN_CHAT_ID }
+      });
+      await tx.roleLimit.upsert({
+        where: { roleId: MAIN_ADMIN_ROLE_ID },
+        create: { roleId: MAIN_ADMIN_ROLE_ID, chatId: MAIN_CHAT_ID },
+        update: { chatId: MAIN_CHAT_ID }
+      });
+      await tx.roleLimit.upsert({
+        where: { roleId: MAIN_MEMBER_ROLE_ID },
+        create: { roleId: MAIN_MEMBER_ROLE_ID, chatId: MAIN_CHAT_ID },
+        update: { chatId: MAIN_CHAT_ID }
+      });
+      await tx.roleLimit.upsert({
+        where: { roleId: MAIN_LEGIT_ROLE_ID },
+        create: {
+          roleId: MAIN_LEGIT_ROLE_ID,
           chatId: MAIN_CHAT_ID,
-          enabled: false,
-          mode: ChannelNotifyMode.off,
-          template: "[{chat_name}] {author_name}: {message_preview}",
-          digestIntervalMinutes: 15,
-          updatedBy: "system"
+          messagesPerDay: 3,
+          exceedAction: PrismaLimitExceedAction.reject
+        },
+        update: {
+          chatId: MAIN_CHAT_ID,
+          messagesPerDay: 3,
+          exceedAction: PrismaLimitExceedAction.reject
         }
+      });
+      await tx.roleLimit.upsert({
+        where: { roleId: MAIN_READONLY_ROLE_ID },
+        create: { roleId: MAIN_READONLY_ROLE_ID, chatId: MAIN_CHAT_ID },
+        update: { chatId: MAIN_CHAT_ID }
       });
     });
   }

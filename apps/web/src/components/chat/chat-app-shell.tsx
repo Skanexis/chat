@@ -68,9 +68,9 @@ function MaintenanceLockScreen({
   onRefresh: () => void;
 }) {
   const [sceneIndex, setSceneIndex] = useState(0);
-  const [sparkleSeed, setSparkleSeed] = useState(0);
   const [telemetryTick, setTelemetryTick] = useState(0);
   const [logIndex, setLogIndex] = useState(0);
+  const [introDone, setIntroDone] = useState(false);
   const [pointer, setPointer] = useState({ x: 50, y: 32 });
 
   useEffect(() => {
@@ -79,6 +79,15 @@ function MaintenanceLockScreen({
     }, 6200);
     return () => {
       window.clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setIntroDone(true);
+    }, 2800);
+    return () => {
+      window.clearTimeout(timer);
     };
   }, []);
 
@@ -101,13 +110,14 @@ function MaintenanceLockScreen({
 
   return (
     <section
-      className="maintenance-shell"
+      className={`maintenance-shell ${introDone ? "is-loop" : "is-intro"}`}
       data-scene={scene}
       style={
         {
           "--mx": `${pointer.x}%`,
           "--my": `${pointer.y}%`,
-          "--spark-seed": sparkleSeed,
+          "--dx": String((pointer.x - 50) / 50),
+          "--dy": String((pointer.y - 50) / 50),
           "--progress": `${progress}%`
         } as CSSProperties
       }
@@ -120,49 +130,46 @@ function MaintenanceLockScreen({
           y: Math.max(0, Math.min(100, y))
         });
       }}
+      onPointerLeave={() => {
+        setPointer({ x: 50, y: 32 });
+      }}
       onClick={() => {
-        setSparkleSeed((prev) => prev + 1);
         setSceneIndex((prev) => (prev + 1) % MAINTENANCE_SCENES.length);
         setTelemetryTick((prev) => prev + 1);
       }}
     >
-      <div className="maintenance-aurora" aria-hidden="true" />
-      <div className="maintenance-grid" aria-hidden="true" />
-      <div className="maintenance-orbit maintenance-orbit-a" aria-hidden="true" />
-      <div className="maintenance-orbit maintenance-orbit-b" aria-hidden="true" />
-      <div className="maintenance-pulse" aria-hidden="true" />
-      <div className="maintenance-noise" aria-hidden="true" />
-      <div className="maintenance-hud" aria-hidden="true">
-        <span>MAINTENANCE</span>
-        <span>{MAINTENANCE_SCENE_LABELS[scene]}</span>
-        <span>phase {activeStep + 1}/4</span>
-      </div>
-      <div className="maintenance-conveyor" aria-hidden="true">
-        <div className="maintenance-track" />
-        <div className="maintenance-track-light" />
+      <div className="maintenance-backdrop" aria-hidden="true" />
+      <div className="maintenance-stage" aria-hidden="true">
+        <div className="maintenance-intro-veil" />
+        <div className="maintenance-stage-grid" />
+        <div className="maintenance-stream maintenance-stream-a" />
+        <div className="maintenance-stream maintenance-stream-b" />
+        <div className="maintenance-core">
+          <span className="maintenance-core-ring maintenance-core-ring-a" />
+          <span className="maintenance-core-ring maintenance-core-ring-b" />
+          <span className="maintenance-core-dot" />
+        </div>
         {Array.from({ length: 8 }).map((_, index) => (
           <div
-            key={`msg-cap-${index}`}
-            className="maintenance-msg-capsule"
+            key={`pod-${index}`}
+            className="maintenance-chat-pod"
+            data-lane={index % 2 === 0 ? "in" : "out"}
             style={
               {
-                "--i": index,
-                "--delay": `${index * 0.42}s`
+                "--pod-delay": `${index * 0.48}s`
               } as CSSProperties
             }
           >
-            <span />
-            <span />
-            <span />
+            <i />
+            <i />
+            <i />
           </div>
         ))}
-        <div className="maintenance-robot">
-          <div className="maintenance-robot-base" />
-          <div className="maintenance-robot-arm" />
-          <div className="maintenance-robot-joint" />
-          <div className="maintenance-robot-head" />
-          <div className="maintenance-robot-beam" />
-        </div>
+      </div>
+      <div className="maintenance-hudline" aria-hidden="true">
+        <span>Maintenance</span>
+        <span>{MAINTENANCE_SCENE_LABELS[scene]}</span>
+        <span>Phase {activeStep + 1}/4</span>
       </div>
       <div className="maintenance-card">
         <span className="maintenance-chip">Maintenance Mode</span>

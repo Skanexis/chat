@@ -102,6 +102,13 @@ function getMessagePreview(message: UiMessage | ChatMessage): string {
   return "[empty message]";
 }
 
+function getDeletedMessageOriginalPreview(message: UiMessage | ChatMessage): string {
+  if (message.isEncrypted) return "[encrypted payload]";
+  if (message.text && message.text.trim().length > 0) return message.text;
+  if (message.media) return `[${message.media.type}] ${message.media.url}`;
+  return "[empty message]";
+}
+
 function getPanelState(statusCode?: number): GlobalUiState {
   if (statusCode === 401) return "unauthorized";
   if (statusCode === 403) return "forbidden";
@@ -162,11 +169,14 @@ const ROLE_PERMISSION_GROUPS: Array<{ label: string; permissions: string[] }> = 
     label: "Chat Core",
     permissions: [
       "chat.view",
+      "chat.join",
+      "chat.leave",
       "message.send.text",
       "message.send.reply",
       "message.react",
       "message.edit.own",
       "message.delete.own",
+      "message.deleted.view",
       "message.search",
       "message.pin.view"
     ]
@@ -230,6 +240,14 @@ const ROLE_PERMISSION_GROUPS: Array<{ label: string; permissions: string[] }> = 
 const ROLE_PERMISSION_PRESETS: Record<string, string[]> = {
   member_default: [
     "chat.view",
+    "chat.join",
+    "chat.leave",
+    "message.react"
+  ],
+  legit_limited: [
+    "chat.view",
+    "chat.join",
+    "chat.leave",
     "message.send.text",
     "message.send.reply",
     "message.react",
@@ -262,6 +280,7 @@ const ROLE_PERMISSION_PRESETS: Record<string, string[]> = {
     "message.edit.own",
     "message.delete.own",
     "message.delete.any",
+    "message.deleted.view",
     "message.edit.any",
     "message.search",
     "message.pin",
@@ -302,16 +321,6 @@ function parseJsonOrThrow(input: string): unknown {
 
 function formatJson(value: unknown): string {
   return JSON.stringify(value, null, 2);
-}
-
-function isMaintenanceBypassRole(roleName: string): boolean {
-  const normalized = roleName.trim().toLowerCase();
-  return (
-    normalized.includes("owner") ||
-    normalized.includes("creator") ||
-    normalized.includes("administrator") ||
-    normalized.includes("admin")
-  );
 }
 
 function useAuthedApi() {
@@ -411,11 +420,13 @@ export function ChatMainSection() {
                       }
                       return {
                         author: resolveAuthorLabel(target, runtime.currentUserId),
-                        text: getMessagePreview(target)
+                text: getMessagePreview(target)
                       };
                     })()
                   : null,
-                text: getMessagePreview(message),
+                text: message.isDeleted ? "Messagio Eliminato" : getMessagePreview(message),
+                deletedOriginalText: message.isDeleted ? getDeletedMessageOriginalPreview(message) : undefined,
+                canRevealDeletedContent: message.isDeleted && runtime.canViewDeletedMessages,
                 createdAtLabel: new Date(message.createdAt).toLocaleTimeString([], {
                   hour: "2-digit",
                   minute: "2-digit"
@@ -423,6 +434,7 @@ export function ChatMainSection() {
                 edited: message.updatedAt !== message.createdAt,
                 encrypted: Boolean(message.isEncrypted),
                 deleted: message.isDeleted,
+                canDelete: message.authorId === runtime.currentUserId || runtime.canDeleteAnyMessages,
                 failed: message.localStatus === "failed",
                 status: message.localStatus === "pending" ? "pending" : "read",
                 reactions: runtime.reactionByMessage[message.id] ?? []
@@ -442,7 +454,11 @@ export function ChatMainSection() {
               onAddReaction={(reaction) => runtime.onAddReaction(message.id, reaction)}
               onRemoveReaction={() => runtime.onRemoveReaction(message.id)}
               onEdit={() => runtime.onEdit(message.id, message.text)}
-              onDelete={() => runtime.onDelete(message.id)}
+              onDelete={
+                message.authorId === runtime.currentUserId || runtime.canDeleteAnyMessages
+                  ? () => runtime.onDelete(message.id)
+                  : undefined
+              }
             />
           ))
         )}
@@ -1733,7 +1749,7 @@ export function ChannelNotifyAdminSection() {
 
   const [enabled, setEnabled] = useState(false);
   const [mode, setMode] = useState<"off" | "instant" | "digest">("off");
-  const [template, setTemplate] = useState("New message in {{chat_name}} from {{author_name}}: {{message_preview}}");
+  const [template, setTemplate] = useState("{author_name} posted a new message.\nTap the button below to view.");
   const [digestIntervalMinutes, setDigestIntervalMinutes] = useState("60");
   const [messagePreview, setMessagePreview] = useState("Test channel notification");
   const [deliver, setDeliver] = useState(false);
@@ -3439,7 +3455,7 @@ export function AdminHubSection() {
   const [maintenanceEnabled, setMaintenanceEnabled] = useState(false);
   const [maintenanceReasonDraft, setMaintenanceReasonDraft] = useState("Scheduled update in progress.");
   const [maintenanceAnimating, setMaintenanceAnimating] = useState(false);
-  const canManageMaintenance = useMemo(() => isMaintenanceBypassRole(runtime.roleName), [runtime.roleName]);
+  const canManageMaintenance = runtime.isMaintenanceBypass;
 
   const load = useCallback(async () => {
     setState("loading");
@@ -3649,7 +3665,7 @@ export function AdminHubSection() {
 
   async function handleToggleMaintenanceMode(): Promise<void> {
     if (!canManageMaintenance) {
-      setError({ message: "Only owner/administrator can change maintenance mode." });
+      setError({ message: "Only roles with maintenance permissions can change maintenance mode." });
       return;
     }
     const reason = maintenanceReasonDraft.trim() || "Scheduled update in progress.";
@@ -3827,7 +3843,7 @@ export function AdminHubSection() {
                   <div>
                     <strong>Maintenance mode</strong>
                     <p>
-                      Locks the app for everyone except <code>owner</code> and <code>administrator</code>.
+                      Locks the app for everyone except roles with maintenance permissions.
                     </p>
                   </div>
                   <button
@@ -3851,7 +3867,7 @@ export function AdminHubSection() {
                 </label>
                 {!canManageMaintenance ? (
                   <RestrictionHint
-                    message="Only owner/administrator role can switch maintenance mode."
+                    message="Only roles with maintenance permissions can switch maintenance mode."
                     variant="warning"
                   />
                 ) : null}
@@ -4164,6 +4180,13 @@ export function AdminHubSection() {
                             onClick={() => applyRolePreset("member_default")}
                           >
                             Member
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant={rolePresetKey === "legit_limited" ? "primary" : "secondary"}
+                            onClick={() => applyRolePreset("legit_limited")}
+                          >
+                            Legit
                           </Button>
                           <Button
                             size="sm"
@@ -4632,6 +4655,9 @@ export function RolesAdminSection() {
                   <div className="panel-actions">
                     <Button size="sm" variant="secondary" onClick={() => applyPermissionPreset("member_default")}>
                       Preset: Member
+                    </Button>
+                    <Button size="sm" variant="secondary" onClick={() => applyPermissionPreset("legit_limited")}>
+                      Preset: Legit
                     </Button>
                     <Button size="sm" variant="secondary" onClick={() => applyPermissionPreset("moderator_core")}>
                       Preset: Moderator

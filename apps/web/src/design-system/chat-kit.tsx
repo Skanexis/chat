@@ -1,4 +1,4 @@
-import { type ChangeEvent, type FormEvent, type KeyboardEvent, type ReactNode, useEffect, useRef } from "react";
+import { type ChangeEvent, type FormEvent, type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from "react";
 
 import { Avatar, Badge, Button, cn } from "@/design-system/primitives";
 
@@ -17,12 +17,15 @@ export type MessageItem = {
     text: string;
   } | null;
   text: string;
+  deletedOriginalText?: string;
+  canRevealDeletedContent?: boolean;
   createdAtLabel: string;
   own: boolean;
   deleted?: boolean;
   encrypted?: boolean;
   edited?: boolean;
   failed?: boolean;
+  canDelete?: boolean;
   status?: "pending" | "sent" | "read";
   reactions?: MessageReaction[];
 };
@@ -128,6 +131,7 @@ export function MessageBubble({
   const swipeStartXRef = useRef<number | null>(null);
   const swipeStartYRef = useRef<number | null>(null);
   const swipeTriggeredRef = useRef(false);
+  const [showDeletedContent, setShowDeletedContent] = useState(false);
 
   function clearLongPressTimer(): void {
     if (longPressTimerRef.current) {
@@ -244,26 +248,30 @@ export function MessageBubble({
                 </button>
               ))}
             </div>
-            {item.own && !item.encrypted ? (
+            {(item.own && !item.encrypted) || item.canDelete ? (
               <div className="ds-action-row ds-selected-tools ds-popover-actions">
-                <button
-                  type="button"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onEdit?.();
-                  }}
-                >
-                  Edit
-                </button>
-                <button
-                  type="button"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onDelete?.();
-                  }}
-                >
-                  Delete
-                </button>
+                {item.own && !item.encrypted ? (
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onEdit?.();
+                    }}
+                  >
+                    Edit
+                  </button>
+                ) : null}
+                {item.canDelete ? (
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onDelete?.();
+                    }}
+                  >
+                    Delete
+                  </button>
+                ) : null}
               </div>
             ) : null}
           </div>
@@ -281,7 +289,34 @@ export function MessageBubble({
             <p>{renderTextWithLinks(item.replyTo.text)}</p>
           </div>
         ) : null}
-        <p className={cn("ds-bubble-text", item.failed ? "is-failed" : undefined)}>{renderTextWithLinks(item.text)}</p>
+        {item.deleted ? (
+          <div className="ds-bubble-deleted">
+            <button
+              type="button"
+              className="ds-bubble-deleted-toggle"
+              onClick={(event) => {
+                event.stopPropagation();
+                if (!item.canRevealDeletedContent) {
+                  return;
+                }
+                setShowDeletedContent((prev) => !prev);
+              }}
+              aria-expanded={item.canRevealDeletedContent ? showDeletedContent : undefined}
+            >
+              {item.text}
+            </button>
+            {item.canRevealDeletedContent ? (
+              <p className="ds-bubble-deleted-hint">
+                {showDeletedContent ? "Nascondi testo originale" : "Tocca per vedere il testo originale"}
+              </p>
+            ) : null}
+            {item.canRevealDeletedContent && showDeletedContent && item.deletedOriginalText ? (
+              <p className="ds-bubble-text ds-bubble-text-deleted-original">{renderTextWithLinks(item.deletedOriginalText)}</p>
+            ) : null}
+          </div>
+        ) : (
+          <p className={cn("ds-bubble-text", item.failed ? "is-failed" : undefined)}>{renderTextWithLinks(item.text)}</p>
+        )}
         <footer className="ds-bubble-foot">
           <div className="ds-meta-row">
             {item.edited ? <Badge variant="neutral">edited</Badge> : null}

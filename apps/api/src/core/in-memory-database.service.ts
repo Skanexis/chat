@@ -28,7 +28,7 @@ import type {
   TicketPatch
 } from "./database.service.js";
 import { createDefaultRoleLimits } from "./limits.js";
-import { BASE_ADMIN_PERMISSIONS, BASE_MEMBER_PERMISSIONS, BASE_OWNER_PERMISSIONS } from "./permissions.js";
+import { BASE_ADMIN_PERMISSIONS, BASE_LEGIT_PERMISSIONS, BASE_MEMBER_PERMISSIONS, BASE_OWNER_PERMISSIONS } from "./permissions.js";
 import type {
   AutomationRule,
   AutomationExecution,
@@ -1703,6 +1703,7 @@ export class InMemoryDatabase implements DatabaseService {
     const ownerRoleId = randomUUID();
     const adminRoleId = randomUUID();
     const memberRoleId = randomUUID();
+    const legitRoleId = randomUUID();
     const readonlyRoleId = randomUUID();
 
     this.roles.set(ownerRoleId, {
@@ -1738,6 +1739,22 @@ export class InMemoryDatabase implements DatabaseService {
       createdAt: now
     });
     this.roleLimits.set(memberRoleId, createDefaultRoleLimits(chatId, memberRoleId, now));
+    this.roles.set(legitRoleId, {
+      id: legitRoleId,
+      chatId,
+      name: "legit",
+      priority: 120,
+      isSystem: true,
+      isDefault: false,
+      permissions: BASE_LEGIT_PERMISSIONS,
+      createdAt: now
+    });
+    const legitLimits = createDefaultRoleLimits(chatId, legitRoleId, now);
+    this.roleLimits.set(legitRoleId, {
+      ...legitLimits,
+      messagesPerDay: 3,
+      exceedAction: "reject"
+    });
     this.roles.set(readonlyRoleId, {
       id: readonlyRoleId,
       chatId,
@@ -1773,7 +1790,7 @@ export class InMemoryDatabase implements DatabaseService {
       chatId,
       enabled: false,
       mode: "off",
-      template: "[{chat_name}] {author_name}: {message_preview}",
+      template: "{author_name} posted a new message.\nTap the button below to view.",
       digestIntervalMinutes: 15,
       updatedBy: "system",
       updatedAt: now

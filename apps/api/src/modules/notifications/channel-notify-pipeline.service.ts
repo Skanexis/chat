@@ -5,7 +5,7 @@ import { DATABASE_SERVICE } from "../../core/database.service.js";
 import type { DatabaseService } from "../../core/database.service.js";
 import { EventBusService } from "../../core/event-bus.service.js";
 import type { Message } from "../../core/types.js";
-import { buildMessagePreview, renderChannelNotifyTemplate } from "./channel-notify-renderer.js";
+import { buildInstantChannelNotifyText, buildMessagePreview, renderChannelNotifyTemplate } from "./channel-notify-renderer.js";
 import { TelegramBotService } from "./telegram-bot.service.js";
 
 @Injectable()
@@ -45,7 +45,7 @@ export class ChannelNotifyPipelineService implements OnModuleInit, OnModuleDestr
       }
 
       if (config.mode === "instant" && !this.isQuietHoursNow()) {
-        await this.deliverInstant(message, config.template);
+        await this.deliverInstant(message);
         return;
       }
 
@@ -116,7 +116,7 @@ export class ChannelNotifyPipelineService implements OnModuleInit, OnModuleDestr
       timestamp: new Date().toISOString()
     });
 
-    const result = await this.botService.sendChannelMessage(rendered);
+    const result = await this.botService.sendChannelMessage(rendered, { chatId });
     await this.db.addAuditLog({
       chatId,
       actorId: "system",
@@ -133,18 +133,11 @@ export class ChannelNotifyPipelineService implements OnModuleInit, OnModuleDestr
     this.digestBuffers.delete(chatId);
   }
 
-  private async deliverInstant(message: Message, template: string): Promise<void> {
-    const chat = await this.db.getChat(message.chatId);
+  private async deliverInstant(message: Message): Promise<void> {
     const author = await this.resolveAuthorName(message);
-    const rendered = renderChannelNotifyTemplate({
-      template,
-      chatName: chat.name,
-      authorName: author,
-      messagePreview: buildMessagePreview(message),
-      timestamp: message.createdAt
-    });
+    const rendered = buildInstantChannelNotifyText(author);
 
-    const result = await this.botService.sendChannelMessage(rendered);
+    const result = await this.botService.sendChannelMessage(rendered, { chatId: message.chatId });
     await this.db.addAuditLog({
       chatId: message.chatId,
       actorId: message.actorUserId,

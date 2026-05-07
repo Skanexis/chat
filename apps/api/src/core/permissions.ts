@@ -2,14 +2,18 @@ export const BASE_MEMBER_PERMISSIONS = [
   "chat.view",
   "chat.join",
   "chat.leave",
+  "message.react"
+];
+
+export const BASE_LEGIT_PERMISSIONS = [
+  "chat.view",
+  "chat.join",
+  "chat.leave",
   "message.send.text",
-  "message.send.encrypted",
   "message.send.reply",
   "message.react",
   "message.edit.own",
-  "message.delete.own",
-  "alert.keyword.create",
-  "alert.keyword.delete"
+  "message.delete.own"
 ];
 
 export const BASE_ADMIN_PERMISSIONS = [
@@ -42,6 +46,7 @@ export const BASE_ADMIN_PERMISSIONS = [
   "ttl.view",
   "ttl.update",
   "message.delete.any",
+  "message.deleted.view",
   "message.edit.any",
   "message.pin",
   "message.pin.view",
