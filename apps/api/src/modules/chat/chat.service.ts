@@ -108,15 +108,18 @@ export class ChatService {
     const beforeTs = query.before ? this.parseDateQuery(query.before, "before") : null;
     const messages = await this.db.listMessages(chatId, {
       before: beforeTs === null ? undefined : new Date(beforeTs).toISOString(),
-      limit: query.limit
+      limit: query.limit,
+      includeDeleted: true
     });
-    return this.enrichMessagesWithAuthorInfo(chatId, messages);
+    const enriched = await this.enrichMessagesWithAuthorInfo(chatId, messages);
+    return Promise.all(enriched.map((message) => this.sanitizeDeletedMessageForMember(chatId, member, message)));
   }
 
   async searchMessages(chatId: string, requestUser: RequestUser, query: SearchMessagesQueryDto): Promise<MessageView[]> {
     const member = await this.db.ensureMember(chatId, requestUser.userId);
     this.policy.assertMemberCanAccess(member);
     await this.policy.assertCan(chatId, member, "message.search");
+    const canViewDeletedContent = await this.policy.hasPermission(chatId, member, MESSAGE_DELETED_VIEW_PERMISSION);
 
     const fromTs = this.parseDateQuery(query.from, "from");
     const toTs = this.parseDateQuery(query.to, "to");
@@ -130,7 +133,7 @@ export class ChatService {
     const fromIso = fromTs !== null ? new Date(fromTs).toISOString() : null;
     const toIso = toTs !== null ? new Date(toTs).toISOString() : null;
 
-    const messages = await this.db.listMessages(chatId);
+    const messages = await this.db.listMessages(chatId, { includeDeleted: true });
     const filtered = messages.filter((message) => {
       if (query.author_id && message.authorId !== query.author_id) {
         return false;
@@ -143,7 +146,8 @@ export class ChatService {
         return false;
       }
 
-      if (normalizedText && !(message.text ?? "").toLowerCase().includes(normalizedText)) {
+      const visibleText = message.isDeleted && !canViewDeletedContent ? "" : (message.text ?? "");
+      if (normalizedText && !visibleText.toLowerCase().includes(normalizedText)) {
         return false;
       }
 
@@ -179,7 +183,8 @@ export class ChatService {
       }
     });
 
-    return this.enrichMessagesWithAuthorInfo(chatId, result);
+    const enriched = await this.enrichMessagesWithAuthorInfo(chatId, result);
+    return Promise.all(enriched.map((message) => this.sanitizeDeletedMessageForMember(chatId, member, message)));
   }
 
   async createMessage(chatId: string, requestUser: RequestUser, dto: CreateMessageDto): Promise<MessageView> {

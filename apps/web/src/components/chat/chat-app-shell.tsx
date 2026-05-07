@@ -1,6 +1,6 @@
 "use client";
 
-import { type CSSProperties, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -8,7 +8,7 @@ import { Badge, ErrorSurface, RolePill, StateBlock, SystemBanner, cn } from "@/d
 import { useChatRuntime } from "@/components/chat/runtime-context";
 
 type ChatAppShellProps = {
-  children: React.ReactNode;
+  children: ReactNode;
 };
 
 function mapStateFromError(code?: number): string {
@@ -24,14 +24,24 @@ function isMaintenanceLockError(message?: string): boolean {
   return text.includes("maintenance mode");
 }
 
-function wsBadgeLabel(status: ReturnType<typeof useChatRuntime>["wsStatus"], attempt: number | null): string {
+function wsBadgeLabel(
+  status: ReturnType<typeof useChatRuntime>["wsStatus"],
+  attempt: number | null,
+  reconnectSeconds: number | null
+): string {
   if (status === "online") {
     return "WS online";
   }
   if (status === "connecting") {
     return "WS connecting";
   }
+  if (status === "syncing") {
+    return "WS syncing";
+  }
   if (status === "reconnecting") {
+    if (reconnectSeconds !== null) {
+      return `WS reconnecting ${reconnectSeconds}s`;
+    }
     return attempt && attempt > 0 ? `WS reconnect ${attempt}` : "WS reconnecting";
   }
   return "WS offline";
@@ -42,129 +52,37 @@ function MaintenanceLockScreen({
 }: {
   reason: string;
 }) {
-  const [pulseIndex, setPulseIndex] = useState(0);
-  const [pointer, setPointer] = useState({ x: 50, y: 50 });
-
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      setPulseIndex((prev) => (prev + 1) % 8);
-    }, 1800);
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, []);
-
   return (
-    <section
-      className="maintenance-studio"
-      aria-label={reason}
-      style={
-        {
-          "--mx": `${pointer.x}%`,
-          "--my": `${pointer.y}%`,
-          "--dx": String((pointer.x - 50) / 50),
-          "--dy": String((pointer.y - 50) / 50)
-        } as CSSProperties
-      }
-      onPointerMove={(event) => {
-        const rect = event.currentTarget.getBoundingClientRect();
-        const x = ((event.clientX - rect.left) / rect.width) * 100;
-        const y = ((event.clientY - rect.top) / rect.height) * 100;
-        setPointer({
-          x: Math.max(0, Math.min(100, x)),
-          y: Math.max(0, Math.min(100, y))
-        });
-      }}
-      onPointerLeave={() => {
-        setPointer({ x: 50, y: 50 });
-      }}
-    >
-      <div className="maintenance-studio-ambience" aria-hidden="true" />
-      <div className="maintenance-studio-vignette" aria-hidden="true" />
-      <div className={`maintenance-factory pulse-${pulseIndex}`} aria-hidden="true">
-        <div className="maintenance-factory-glow" />
-
-        <div className="maintenance-arm maintenance-arm-top">
-          <span className="seg seg-1" />
-          <span className="seg seg-2" />
-          <span className="tool">
+    <section className="maintenance-simple" aria-label={reason}>
+      <div className="maintenance-simple-bg" aria-hidden="true" />
+      <div className="maintenance-simple-stage" aria-hidden="true">
+        <div className="maintenance-gears">
+          <div className="maintenance-gear maintenance-gear-lg">
             <i />
+          </div>
+          <div className="maintenance-gear maintenance-gear-md">
             <i />
+          </div>
+          <div className="maintenance-gear maintenance-gear-sm">
             <i />
-          </span>
-        </div>
-        <div className="maintenance-arm maintenance-arm-left">
-          <span className="seg seg-1" />
-          <span className="seg seg-2" />
-          <span className="tool">
-            <i />
-            <i />
-            <i />
-          </span>
-        </div>
-        <div className="maintenance-arm maintenance-arm-right">
-          <span className="seg seg-1" />
-          <span className="seg seg-2" />
-          <span className="tool">
-            <i />
-            <i />
-            <i />
-          </span>
+          </div>
         </div>
 
-        <div className="maintenance-device">
-          <div className="maintenance-screen">
-            <div className="maintenance-screen-grid" />
-            <div className="maintenance-scanline scan-a" />
-            <div className="maintenance-scanline scan-b" />
-            <div className="maintenance-scanline scan-c" />
-
-            <div className="maintenance-thread thread-a" />
-            <div className="maintenance-thread thread-b" />
-            <div className="maintenance-thread thread-c" />
-
-            {Array.from({ length: 10 }).map((_, index) => (
-              <div
-                key={`bubble-${index}`}
-                className="maintenance-message-bubble"
-                data-side={index % 2 === 0 ? "left" : "right"}
-                style={{ "--delay": `${index * 0.34}s` } as CSSProperties}
-              >
-                <span />
-                <span />
-                <span />
-              </div>
+        <div className="maintenance-liquid-orb">
+          <div className="maintenance-orb-water">
+            <b className="wave wave-a" />
+            <b className="wave wave-b" />
+          </div>
+          <div className="maintenance-orb-bubbles">
+            {Array.from({ length: 12 }).map((_, index) => (
+              <span key={`orb-bubble-${index}`} />
             ))}
-
-            <div className="maintenance-spark-cloud">
-              {Array.from({ length: 14 }).map((_, index) => (
-                <i key={`spark-${index}`} style={{ "--spark-delay": `${index * 0.22}s` } as CSSProperties} />
-              ))}
-            </div>
           </div>
-          <div className="maintenance-screen-glass" />
+          <div className="maintenance-orb-glass" />
+          <strong>80%</strong>
         </div>
 
-        <div className="maintenance-data-stream">
-          {Array.from({ length: 6 }).map((_, index) => (
-            <em key={`stream-${index}`} style={{ "--stream-delay": `${index * 0.45}s` } as CSSProperties} />
-          ))}
-        </div>
-
-        <div className="maintenance-floor">
-          <div className="maintenance-floor-lane lane-a" />
-          <div className="maintenance-floor-lane lane-b" />
-          <div className="maintenance-floor-lane lane-c" />
-        </div>
-
-        <div className="maintenance-status-mark">
-          <span>In development</span>
-          <div className="status-pulse">
-            <i />
-            <i />
-            <i />
-          </div>
-        </div>
+        <p>In development</p>
       </div>
     </section>
   );
@@ -173,10 +91,11 @@ function MaintenanceLockScreen({
 export function ChatAppShell({ children }: ChatAppShellProps) {
   const runtime = useChatRuntime();
   const pathname = usePathname();
+  const [reconnectTick, setReconnectTick] = useState(() => Date.now());
 
   const rootPath = `/chat/${encodeURIComponent(runtime.chatId)}`;
   const normalizedPathname = pathname.endsWith("/") && pathname.length > 1 ? pathname.slice(0, -1) : pathname;
-  const memberRestrictedPaths = new Set([
+  const devOnlyPaths = new Set([
     `${rootPath}/search`,
     `${rootPath}/pinned`,
     `${rootPath}/drafts`,
@@ -190,14 +109,20 @@ export function ChatAppShell({ children }: ChatAppShellProps) {
     `${rootPath}/translations`,
     `${rootPath}/e2e-devices`
   ]);
+  const memberRestrictedPaths = new Set<string>([]);
   const showMainNav = runtime.isAdmin || runtime.isModerator;
   const mainNavItems = showMainNav
-    ? runtime.isAdmin
+    ? runtime.isDeveloper
       ? [
           { label: "Chat", href: rootPath },
-          { label: "Admin", href: `${rootPath}/admin` }
+          { label: "DEV", href: `${rootPath}/admin` }
         ]
-      : [{ label: "Chat", href: rootPath }]
+      : runtime.isAdmin
+        ? [
+            { label: "Chat", href: rootPath },
+            { label: "Admin", href: `${rootPath}/admin` }
+          ]
+        : [{ label: "Chat", href: rootPath }]
     : [];
   const workspaceNavItems: Array<{ label: string; href: string }> = [];
   const adminNavItems: Array<{ label: string; href: string }> = [];
@@ -219,6 +144,30 @@ export function ChatAppShell({ children }: ChatAppShellProps) {
   }
 
   const showFooterNav = mainNavItems.length > 0 || workspaceNavItems.length > 0 || adminNavItems.length > 0;
+
+  useEffect(() => {
+    if (runtime.wsStatus !== "reconnecting" || !runtime.wsReconnectStartedAt) {
+      return;
+    }
+    setReconnectTick(Date.now());
+    const timer = window.setInterval(() => {
+      setReconnectTick(Date.now());
+    }, 1000);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [runtime.wsStatus, runtime.wsReconnectStartedAt]);
+
+  const reconnectSeconds = useMemo(() => {
+    if (!runtime.wsReconnectStartedAt || runtime.wsStatus !== "reconnecting") {
+      return null;
+    }
+    const startedAtMs = Date.parse(runtime.wsReconnectStartedAt);
+    if (!Number.isFinite(startedAtMs)) {
+      return null;
+    }
+    return Math.max(1, Math.floor((reconnectTick - startedAtMs) / 1000));
+  }, [runtime.wsReconnectStartedAt, runtime.wsStatus, reconnectTick]);
 
   if (runtime.state === "initializing") {
     return (
@@ -257,6 +206,20 @@ export function ChatAppShell({ children }: ChatAppShellProps) {
     );
   }
 
+  if (!runtime.isDeveloper && devOnlyPaths.has(normalizedPathname)) {
+    return (
+      <section className="app-shell">
+        <ErrorSurface
+          code={403}
+          title="Forbidden"
+          message="This section is available only for Developer role."
+          actionLabel="Go to Chat"
+          onAction={runtime.reload}
+        />
+      </section>
+    );
+  }
+
   if (!runtime.isModerator && memberRestrictedPaths.has(normalizedPathname)) {
     return (
       <section className="app-shell">
@@ -279,8 +242,10 @@ export function ChatAppShell({ children }: ChatAppShellProps) {
         </div>
         <div className="app-meta">
           <RolePill role={runtime.roleName} />
-          <Badge variant={runtime.wsStatus === "online" ? "success" : runtime.wsStatus === "offline" ? "danger" : "warning"}>
-            {wsBadgeLabel(runtime.wsStatus, runtime.wsReconnectAttempt)}
+          <Badge
+            variant={runtime.wsStatus === "online" ? "success" : runtime.wsStatus === "offline" ? "danger" : "warning"}
+          >
+            {wsBadgeLabel(runtime.wsStatus, runtime.wsReconnectAttempt, reconnectSeconds)}
           </Badge>
         </div>
       </header>

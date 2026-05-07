@@ -232,10 +232,104 @@ const ROLE_PERMISSION_GROUPS: Array<{ label: string; permissions: string[] }> = 
     ]
   },
   {
+    label: "Extended Chat and Invite",
+    permissions: [
+      "chat.invite.create",
+      "chat.invite.revoke",
+      "chat.invite.use_unlimited",
+      "member.approve_join",
+      "member.reject_join",
+      "message.edit.any",
+      "message.delete.any",
+      "message.pin",
+      "message.unpin"
+    ]
+  },
+  {
+    label: "Delivery and Drafts",
+    permissions: [
+      "draft.create",
+      "draft.update",
+      "draft.delete",
+      "draft.schedule_send",
+      "message.send.as_group.signature.hide",
+      "message.send.as_group.signature.custom",
+      "channel.notify.template.edit",
+      "summary.unread.generate",
+      "summary.unread.configure",
+      "read_receipt.view.own",
+      "read_receipt.view.any"
+    ]
+  },
+  {
+    label: "Broadcast and Integrations",
+    permissions: [
+      "integration.webhook.rotate_secret",
+      "integration.webhook.disable",
+      "broadcast.update",
+      "broadcast.delete",
+      "broadcast.publish.now",
+      "broadcast.schedule",
+      "broadcast.pause",
+      "broadcast.resume",
+      "broadcast.cancel",
+      "broadcast.audience.manage",
+      "broadcast.template.manage",
+      "broadcast.stats.view"
+    ]
+  },
+  {
+    label: "Knowledge and Translation",
+    permissions: [
+      "knowledge.article.create",
+      "knowledge.article.update",
+      "knowledge.article.publish",
+      "knowledge.article.archive",
+      "translation.use",
+      "translation.manage",
+      "bookmark.collection.manage"
+    ]
+  },
+  {
+    label: "Security and Meta",
+    permissions: [
+      "e2e.device.register",
+      "e2e.device.view",
+      "poll.quiz.create",
+      "poll.quiz.close",
+      "poll.quiz.results.view",
+      "ticket.create",
+      "ticket.assign",
+      "ticket.close",
+      "ticket.sla.manage",
+      "member.tag.create",
+      "member.tag.assign",
+      "member.profile_fields.manage",
+      "automation.rule.update",
+      "automation.rule.execute",
+      "room.temp.create",
+      "room.temp.archive",
+      "room.temp.restore",
+      "reputation.view",
+      "reputation.adjust",
+      "limit.update.user",
+      "limit.reset.user",
+      "slowmode.view",
+      "slowmode.update",
+      "ttl.view",
+      "ttl.update",
+      "incident_mode.disable",
+      "incident_mode.policy.edit",
+      "audit.export"
+    ]
+  },
+  {
     label: "UI",
     permissions: [ROLE_BADGE_PERMISSION]
   }
 ];
+
+const KNOWN_ROLE_PERMISSIONS = new Set(ROLE_PERMISSION_GROUPS.flatMap((group) => group.permissions));
 
 const ROLE_PERMISSION_PRESETS: Record<string, string[]> = {
   member_default: [
@@ -487,8 +581,14 @@ export function ChatMainSection() {
                 runtime.setReplyToMessageId(message.id);
                 setSelectedMessageId(message.id);
               }}
-              onAddReaction={(reaction) => runtime.onAddReaction(message.id, reaction)}
-              onRemoveReaction={() => runtime.onRemoveReaction(message.id)}
+              onAddReaction={async (reaction) => {
+                await runtime.onAddReaction(message.id, reaction);
+                setSelectedMessageId(null);
+              }}
+              onRemoveReaction={async () => {
+                await runtime.onRemoveReaction(message.id);
+                setSelectedMessageId(null);
+              }}
               onEdit={() => runtime.onEdit(message.id, message.text)}
               onDelete={
                 message.authorId === runtime.currentUserId || runtime.canDeleteAnyMessages
@@ -3426,6 +3526,7 @@ function AdminNavChips() {
   const runtime = useChatRuntime();
   const pathname = usePathname();
   const base = `/chat/${encodeURIComponent(runtime.chatId)}/admin`;
+  const root = `/chat/${encodeURIComponent(runtime.chatId)}`;
   const links = [
     { href: `${base}/roles`, label: "Roles", admin: true },
     { href: `${base}/limits`, label: "Limits", admin: true },
@@ -3439,8 +3540,20 @@ function AdminNavChips() {
     { href: `${base}/automation`, label: "Automation", admin: true },
     { href: `${base}/tickets`, label: "Tickets", moderator: true },
     { href: `${base}/incident`, label: "Incident", admin: true },
-    { href: `${base}/audit`, label: "Audit", admin: true }
-  ].filter((item) => (item.admin ? runtime.isAdmin : item.moderator ? runtime.isModerator : true));
+    { href: `${base}/audit`, label: "Audit", admin: true },
+    { href: `${root}/search`, label: "Search", devOnly: true },
+    { href: `${root}/pinned`, label: "Pinned", devOnly: true },
+    { href: `${root}/drafts`, label: "Drafts", devOnly: true },
+    { href: `${root}/bookmarks`, label: "Bookmarks", devOnly: true },
+    { href: `${root}/reminders`, label: "Reminders", devOnly: true },
+    { href: `${root}/read-receipts`, label: "Receipts", devOnly: true },
+    { href: `${root}/thread-subscriptions`, label: "Threads", devOnly: true },
+    { href: `${root}/polls`, label: "Polls", devOnly: true },
+    { href: `${root}/reputation`, label: "Reputation", devOnly: true },
+    { href: `${root}/knowledge`, label: "Knowledge", devOnly: true },
+    { href: `${root}/translations`, label: "Translate", devOnly: true },
+    { href: `${root}/e2e-devices`, label: "E2E", devOnly: true }
+  ].filter((item) => (item.devOnly ? runtime.isDeveloper : item.admin ? runtime.isAdmin : item.moderator ? runtime.isModerator : true));
 
   return (
     <div className="panel-chip-list">
@@ -3613,6 +3726,10 @@ export function AdminHubSection() {
         (entry.reason ?? "").toLowerCase().includes(normalized)
     );
   }, [historyTargetSearch, moderationHistory]);
+  const roleUnknownPermissions = useMemo(
+    () => rolePermissionsDraft.filter((permission) => permission !== "*" && !KNOWN_ROLE_PERMISSIONS.has(permission)),
+    [rolePermissionsDraft]
+  );
 
   async function withMemberAction(
     userId: string,
@@ -3741,6 +3858,15 @@ export function AdminHubSection() {
     const preset = ROLE_PERMISSION_PRESETS[presetKey];
     setRolePresetKey(presetKey);
     setRolePermissionsDraft(Array.from(new Set(preset)));
+  }
+
+  function setRoleFullAccess(enabled: boolean): void {
+    setRolePermissionsDraft((prev) => {
+      if (enabled) {
+        return ["*"];
+      }
+      return prev.filter((permission) => permission !== "*");
+    });
   }
 
   function setRoleBadgeEnabled(enabled: boolean): void {
@@ -4288,6 +4414,14 @@ export function AdminHubSection() {
                     {roleWizardStep === 3 ? (
                       <section className="panel-subcard admin-inline-subcard">
                         <SectionTitle title="Step 3: Fine Tune Permissions" subtitle="Use checkboxes to refine access before saving role." />
+                        <label className="panel-inline-check">
+                          <input
+                            type="checkbox"
+                            checked={rolePermissionsDraft.includes("*")}
+                            onChange={(event) => setRoleFullAccess(event.target.checked)}
+                          />
+                          <span>Full access (*)</span>
+                        </label>
                         <div className="permission-grid">
                           {ROLE_PERMISSION_GROUPS.map((group) => (
                             <article key={group.label} className="permission-group-card">
@@ -4310,6 +4444,23 @@ export function AdminHubSection() {
                             </article>
                           ))}
                         </div>
+                        {roleUnknownPermissions.length > 0 ? (
+                          <section className="panel-subcard">
+                            <SectionTitle
+                              title="Custom permissions"
+                              subtitle="These permissions are not in checkbox groups. You can remove them here."
+                            />
+                            <div className="panel-chip-list">
+                              {roleUnknownPermissions.map((permission) => (
+                                <div key={`unknown-role-perm-${permission}`} className="panel-chip">
+                                  <button type="button" onClick={() => toggleRolePermission(permission)}>
+                                    {permission} x
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          </section>
+                        ) : null}
                       </section>
                     ) : null}
 
@@ -4526,9 +4677,18 @@ export function RolesAdminSection() {
     );
   }
 
+  function setEditorFullAccess(enabled: boolean): void {
+    setEditorPermissions((prev) => {
+      if (enabled) {
+        return ["*"];
+      }
+      return prev.filter((permission) => permission !== "*");
+    });
+  }
+
   function applyPermissionPreset(presetKey: keyof typeof ROLE_PERMISSION_PRESETS): void {
     const preset = ROLE_PERMISSION_PRESETS[presetKey];
-    setEditorPermissions((prev) => Array.from(new Set([...prev, ...preset])));
+    setEditorPermissions(Array.from(new Set(preset)));
   }
 
   async function handleSaveSelectedRole(): Promise<void> {
@@ -4622,6 +4782,9 @@ export function RolesAdminSection() {
   }
 
   const selectedRole = roles.find((entry) => entry.id === selectedRoleId) ?? null;
+  const unknownEditorPermissions = editorPermissions.filter(
+    (permission) => permission !== "*" && !KNOWN_ROLE_PERMISSIONS.has(permission)
+  );
 
   if (state !== "ready" && state !== "updating") {
     return (
@@ -4705,6 +4868,14 @@ export function RolesAdminSection() {
                       Preset: Owner
                     </Button>
                   </div>
+                  <label className="panel-inline-check">
+                    <input
+                      type="checkbox"
+                      checked={editorPermissions.includes("*")}
+                      onChange={(event) => setEditorFullAccess(event.target.checked)}
+                    />
+                    <span>Full access (*)</span>
+                  </label>
                   <div className="permission-grid">
                     {ROLE_PERMISSION_GROUPS.map((group) => (
                       <article key={group.label} className="permission-group-card">
@@ -4727,6 +4898,23 @@ export function RolesAdminSection() {
                       </article>
                     ))}
                   </div>
+                  {unknownEditorPermissions.length > 0 ? (
+                    <section className="panel-subcard">
+                      <SectionTitle
+                        title="Custom permissions"
+                        subtitle="These permissions are not in checkbox groups. You can remove them here."
+                      />
+                      <div className="panel-chip-list">
+                        {unknownEditorPermissions.map((permission) => (
+                          <div key={`unknown-editor-perm-${permission}`} className="panel-chip">
+                            <button type="button" onClick={() => toggleEditorPermission(permission)}>
+                              {permission} x
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  ) : null}
                   <label>
                     Manual permission list (comma-separated)
                     <textarea

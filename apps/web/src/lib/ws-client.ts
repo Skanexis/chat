@@ -52,19 +52,53 @@ export function connectChatSocket(apiBaseUrl: string, token: string, chatId: str
     path: "/ws/socket.io",
     transports: ["websocket", "polling"],
     reconnection: true,
-    reconnectionAttempts: 20,
     reconnectionDelay: 800,
     reconnectionDelayMax: 5000,
+    randomizationFactor: 0.5,
+    timeout: 10000,
     auth: {
       token
     }
   });
+  const hasWindow = typeof window !== "undefined";
+  const hasNavigator = typeof navigator !== "undefined";
+
+  const forceReconnect = (): void => {
+    if (hasNavigator && navigator.onLine === false) {
+      return;
+    }
+    if (!socket.connected) {
+      socket.connect();
+    }
+  };
+
+  const handleOnline = (): void => {
+    forceReconnect();
+  };
+  const handleOffline = (): void => {
+    callbacks.onDisconnected?.("network offline");
+  };
+
+  if (hasWindow) {
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+  }
+
+  const reconnectHealthTimer = setInterval(() => {
+    forceReconnect();
+  }, 5000);
 
   socket.on("connect", () => {
     callbacks.onConnected?.();
     socket.emit("chat.join", { chatId });
   });
-  socket.on("disconnect", (reason: string) => callbacks.onDisconnected?.(reason));
+  socket.on("disconnect", (reason: string) => {
+    callbacks.onDisconnected?.(reason);
+    // If server closed the namespace, force reconnect without page reload.
+    if (reason === "io server disconnect") {
+      forceReconnect();
+    }
+  });
   socket.io.on("reconnect_attempt", (attempt: number) => callbacks.onReconnecting?.(attempt));
   socket.io.on("reconnect", (attempt: number) => callbacks.onReconnected?.(attempt));
   socket.io.on("reconnect_failed", () => callbacks.onReconnectFailed?.());
@@ -94,6 +128,11 @@ export function connectChatSocket(apiBaseUrl: string, token: string, chatId: str
   return {
     socket,
     disconnect: () => {
+      clearInterval(reconnectHealthTimer);
+      if (hasWindow) {
+        window.removeEventListener("online", handleOnline);
+        window.removeEventListener("offline", handleOffline);
+      }
       socket.removeAllListeners();
       socket.disconnect();
     }

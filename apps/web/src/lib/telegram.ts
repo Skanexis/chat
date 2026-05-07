@@ -9,6 +9,10 @@ type TelegramWebApp = {
   };
   ready?: () => void;
   expand?: () => void;
+  requestFullscreen?: () => void;
+  disableVerticalSwipes?: () => void;
+  setHeaderColor?: (color: string) => void;
+  setBackgroundColor?: (color: string) => void;
 };
 
 type TelegramWindow = Window & {
@@ -71,6 +75,31 @@ export function initTelegramViewport(): void {
 
   const tgWindow = window as TelegramWindow;
   const webApp = tgWindow.Telegram?.WebApp;
-  webApp?.ready?.();
-  webApp?.expand?.();
+  if (!webApp) {
+    return;
+  }
+
+  webApp.ready?.();
+  webApp.expand?.();
+
+  // Best-effort fullscreen for Telegram clients that support it.
+  try {
+    webApp.requestFullscreen?.();
+  } catch {
+    // Ignore unsupported clients.
+  }
+
+  // Reduce visible Telegram chrome where possible.
+  try {
+    webApp.setHeaderColor?.("#0b0b11");
+    webApp.setBackgroundColor?.("#0b0b11");
+  } catch {
+    // Ignore unsupported clients.
+  }
+
+  try {
+    webApp.disableVerticalSwipes?.();
+  } catch {
+    // Ignore unsupported clients.
+  }
 }

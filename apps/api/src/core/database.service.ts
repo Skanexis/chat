@@ -129,6 +129,7 @@ export type TempRoomPatch = Partial<Pick<TempRoom, "status" | "archivedAt">>;
 export type ListMessagesOptions = {
   before?: string;
   limit?: number;
+  includeDeleted?: boolean;
 };
 export type CountAuditOptions = {
   action?: string;

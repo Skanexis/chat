@@ -637,10 +637,11 @@ export class PrismaDatabaseService implements DatabaseService {
     await this.ensureSeeded();
     const beforeDate = options.before ? new Date(options.before) : undefined;
     const limit = options.limit && options.limit > 0 ? Math.floor(options.limit) : null;
+    const includeDeleted = options.includeDeleted ?? false;
     const messages = await this.prisma.message.findMany({
       where: {
         chatId,
-        isDeleted: false,
+        ...(includeDeleted ? {} : { isDeleted: false }),
         createdAt: beforeDate
           ? {
               lt: beforeDate

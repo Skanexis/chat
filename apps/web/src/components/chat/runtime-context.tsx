@@ -34,7 +34,7 @@ export type UiMessage = ChatMessage & {
 };
 
 export type LoadState = "initializing" | "ready" | "error";
-export type WsStatus = "connecting" | "online" | "reconnecting" | "offline";
+export type WsStatus = "connecting" | "online" | "reconnecting" | "syncing" | "offline";
 
 export type UiError = {
   message: string;
@@ -48,6 +48,7 @@ type ChatRuntimeValue = {
   wsConnected: boolean;
   wsStatus: WsStatus;
   wsReconnectAttempt: number | null;
+  wsReconnectStartedAt: string | null;
   session: Session | null;
   chat: ChatView | null;
   identities: ChatIdentity[];
@@ -78,6 +79,7 @@ type ChatRuntimeValue = {
   replyToMessageId: string | null;
   senderMode: SenderModeValue;
   roleName: string;
+  isDeveloper: boolean;
   isAdmin: boolean;
   isModerator: boolean;
   canDeleteAnyMessages: boolean;
@@ -137,6 +139,7 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
   const socketRef = useRef<ChatSocket | null>(null);
   const typingStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const currentUserIdRef = useRef<string | null>(null);
+  const hasConnectedOnceRef = useRef(false);
 
   const [reloadToken, setReloadToken] = useState(0);
   const [state, setState] = useState<LoadState>("initializing");
@@ -173,6 +176,7 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
   const [wsConnected, setWsConnected] = useState(false);
   const [wsStatus, setWsStatus] = useState<WsStatus>("connecting");
   const [wsReconnectAttempt, setWsReconnectAttempt] = useState<number | null>(null);
+  const [wsReconnectStartedAt, setWsReconnectStartedAt] = useState<string | null>(null);
   const [senderMode, setSenderMode] = useState<SenderModeValue>("as_user");
 
   const currentUserId = session?.user.id ?? null;
@@ -181,6 +185,7 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
   const permissionSet = useMemo(() => new Set(rolePermissions), [rolePermissions]);
   const normalizedRole = roleName.toLowerCase();
   const isOwnerLike = normalizedRole.includes("owner") || normalizedRole.includes("creator");
+  const isDeveloper = permissionSet.has("*");
   const isMaintenanceBypass =
     permissionSet.has("*") || (permissionSet.has("incident_mode.enable") && permissionSet.has("incident_mode.disable"));
   const isAdminByName = normalizedRole.includes("admin") || isOwnerLike;
@@ -241,6 +246,8 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
         setWsConnected(false);
         setWsStatus("connecting");
         setWsReconnectAttempt(null);
+        setWsReconnectStartedAt(null);
+        hasConnectedOnceRef.current = false;
         setTypingUsers([]);
         setLiveTicketsById({});
         setLiveAutomationExecutions([]);
@@ -306,9 +313,14 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
         socketRef.current?.disconnect();
         socketRef.current = connectChatSocket(appConfig.apiBaseUrl, activeSession.accessToken, chatId, {
           onConnected: () => {
+            const wasConnectedBefore = hasConnectedOnceRef.current;
+            hasConnectedOnceRef.current = true;
             setWsConnected(true);
-            setWsStatus("online");
+            setWsStatus(wasConnectedBefore ? "syncing" : "online");
             setWsReconnectAttempt(null);
+            if (!wasConnectedBefore) {
+              setWsReconnectStartedAt(null);
+            }
             markWsEvent();
             invalidate("invites");
             invalidate("webhooks");
@@ -318,15 +330,19 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
           onDisconnected: (reason) => {
             setWsConnected(false);
             setWsStatus(reason === "io server disconnect" ? "offline" : "reconnecting");
+            if (reason !== "io server disconnect") {
+              setWsReconnectStartedAt((prev) => prev ?? new Date().toISOString());
+            }
           },
           onReconnecting: (attempt) => {
             setWsConnected(false);
             setWsStatus("reconnecting");
             setWsReconnectAttempt(attempt);
+            setWsReconnectStartedAt((prev) => prev ?? new Date().toISOString());
           },
           onReconnected: (attempt) => {
             setWsConnected(true);
-            setWsStatus("online");
+            setWsStatus("syncing");
             setWsReconnectAttempt(null);
             markWsEvent();
             invalidate("invites");
@@ -340,11 +356,15 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
           onReconnectFailed: () => {
             setWsConnected(false);
             setWsStatus("offline");
+            setWsReconnectStartedAt(null);
             setError({ message: "WS reconnect failed. Tap reload to restore live updates." });
           },
           onSnapshot: (payload) => {
             setChat(payload.chat);
             setMessages(payload.messages.map((message) => ({ ...message })));
+            setWsStatus("online");
+            setWsReconnectAttempt(null);
+            setWsReconnectStartedAt(null);
           },
           onMessageCreated: (message) => {
             markWsEvent();
@@ -497,6 +517,7 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
       setWsConnected(false);
       setWsStatus("offline");
       setWsReconnectAttempt(null);
+      setWsReconnectStartedAt(null);
       if (typingStopTimerRef.current) {
         clearTimeout(typingStopTimerRef.current);
         typingStopTimerRef.current = null;
@@ -544,7 +565,7 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
     return options;
   }, [canUseGroupSender, canUseRoleProfileSender, groupIdentity, roleProfileIdentity]);
 
-  const canSend = chat?.member.status === "active" && canSendText && wsConnected;
+  const canSend = chat?.member.status === "active" && canSendText;
   const restrictionText =
     chat?.member.status === "muted"
       ? "You are muted in this chat. Sending is temporarily disabled."
@@ -555,7 +576,7 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
         : chat?.member.status === "active" && !canSendText
           ? "Your role has read-only access with reactions only."
           : !wsConnected
-            ? "Realtime connection is restoring. Sending is temporarily paused to avoid message loss."
+            ? "Realtime connection is restoring. Sending works, but live updates can be delayed."
             : null;
 
   function applyBootstrap(bootstrap: BootstrapResponse): void {
@@ -584,11 +605,6 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
     if (!text) {
       return;
     }
-    if (!wsConnected) {
-      setError({ message: "WS reconnecting. Please wait until connection is online before sending." });
-      return;
-    }
-
     const identityId = resolveIdentityId();
     if (senderMode === "as_group" && !canUseGroupSender) {
       setError({ message: "Group sender mode is not allowed for your role.", statusCode: 403 });
@@ -737,6 +753,7 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
       wsConnected,
       wsStatus,
       wsReconnectAttempt,
+      wsReconnectStartedAt,
       session,
       chat,
       identities,
@@ -762,6 +779,7 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
       replyToMessageId,
       senderMode,
       roleName,
+      isDeveloper,
       isAdmin,
       isModerator,
       canDeleteAnyMessages,
@@ -813,6 +831,7 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
       replyToMessageId,
       restrictionText,
       roleName,
+      isDeveloper,
       senderMode,
       senderOptions,
       sending,
@@ -822,7 +841,8 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
       wsLastEventAt,
       wsConnected,
       wsStatus,
-      wsReconnectAttempt
+      wsReconnectAttempt,
+      wsReconnectStartedAt
     ]
   );
 

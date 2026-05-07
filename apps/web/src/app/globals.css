@@ -34,6 +34,7 @@ body {
   min-height: 100%;
   margin: 0;
   padding: 0;
+  overflow-x: hidden;
   background:
     radial-gradient(1000px 450px at 15% -10%, rgba(124, 58, 237, 0.25), transparent),
     radial-gradient(950px 420px at 95% 20%, rgba(217, 70, 239, 0.16), transparent),
@@ -968,6 +969,7 @@ button {
   min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow-x: clip;
 }
 
 .chat-feed {
@@ -976,10 +978,13 @@ button {
   flex-direction: column;
   gap: 8px;
   overflow-y: auto;
+  overflow-x: clip;
   flex: 1;
   min-height: 0;
   overscroll-behavior: contain;
+  overscroll-behavior-x: none;
   -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
 }
 
 .chat-scroll-actions {
@@ -1331,6 +1336,7 @@ button {
   gap: 7px;
   align-items: flex-end;
   animation: bubble-wrap-in var(--speed-slow) var(--ease-standard);
+  max-width: 100%;
 }
 
 .ds-bubble-wrap.is-own {
@@ -1340,7 +1346,7 @@ button {
 .ds-bubble {
   max-width: 82%;
   border-radius: 15px;
-  padding: 9px;
+  padding: 7px;
   border: 1px solid var(--line);
   position: relative;
   overflow: visible;
@@ -1410,8 +1416,17 @@ button {
 }
 
 .ds-reply-swipe-cue-icon {
-  font-size: 12px;
-  line-height: 1;
+  width: 12px;
+  height: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ds-reply-swipe-cue-icon svg {
+  width: 12px;
+  height: 12px;
+  display: block;
 }
 
 .ds-bubble-own {
@@ -3136,6 +3151,233 @@ button {
   }
 }
 
+.maintenance-simple {
+  position: relative;
+  height: 100dvh;
+  min-height: 100dvh;
+  width: 100%;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(1200px 640px at 50% -16%, rgba(70, 163, 255, 0.18), transparent 56%),
+    radial-gradient(900px 520px at 100% 100%, rgba(57, 214, 171, 0.14), transparent 58%),
+    linear-gradient(180deg, #081523 0%, #040b14 100%);
+}
+
+.maintenance-simple-bg {
+  position: absolute;
+  inset: -16%;
+  background:
+    radial-gradient(circle at 18% 22%, rgba(75, 208, 255, 0.2), transparent 26%),
+    radial-gradient(circle at 76% 78%, rgba(70, 123, 255, 0.2), transparent 28%),
+    radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.06) 0, rgba(255, 255, 255, 0) 52%);
+  filter: blur(34px) saturate(115%);
+  animation: maintenance-simple-bg-drift 12s ease-in-out infinite;
+}
+
+.maintenance-simple-stage {
+  position: relative;
+  z-index: 1;
+  width: min(92vw, 460px);
+  display: grid;
+  justify-items: center;
+  gap: 20px;
+}
+
+.maintenance-gears {
+  position: relative;
+  width: min(88vw, 360px);
+  height: 138px;
+}
+
+.maintenance-gear {
+  --size: 100px;
+  --dur: 8s;
+  position: absolute;
+  width: var(--size);
+  height: var(--size);
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(3, 12, 24, 0.8) 0 28%, transparent 30%),
+    repeating-conic-gradient(
+      from 0deg,
+      rgba(179, 230, 255, 0.9) 0deg 13deg,
+      rgba(94, 190, 255, 0.78) 13deg 23deg
+    );
+  box-shadow:
+    0 16px 30px rgba(0, 0, 0, 0.34),
+    inset 0 0 24px rgba(123, 220, 255, 0.34);
+  animation: maintenance-gear-spin var(--dur) linear infinite;
+}
+
+.maintenance-gear::before {
+  content: "";
+  position: absolute;
+  inset: 16%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 36% 32%, #b5ecff 0%, #6cb8ff 42%, #2f558d 100%);
+}
+
+.maintenance-gear i {
+  position: absolute;
+  inset: 36%;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(232, 248, 255, 0.95), rgba(97, 189, 255, 0.68) 62%, rgba(4, 22, 41, 0.95) 100%);
+  box-shadow: inset 0 0 8px rgba(255, 255, 255, 0.3);
+}
+
+.maintenance-gear-lg {
+  --size: 116px;
+  --dur: 10s;
+  left: 8px;
+  top: 4px;
+}
+
+.maintenance-gear-md {
+  --size: 90px;
+  --dur: 6.8s;
+  right: 12px;
+  top: 14px;
+  animation-direction: reverse;
+}
+
+.maintenance-gear-sm {
+  --size: 72px;
+  --dur: 4.9s;
+  left: 148px;
+  top: 58px;
+}
+
+.maintenance-liquid-orb {
+  position: relative;
+  width: min(68vw, 248px);
+  aspect-ratio: 1 / 1;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 3px solid rgba(169, 233, 255, 0.62);
+  background: radial-gradient(circle at 34% 20%, rgba(197, 245, 255, 0.36), rgba(20, 38, 61, 0.88) 62%);
+  box-shadow:
+    0 20px 54px rgba(0, 0, 0, 0.46),
+    inset 0 0 24px rgba(136, 220, 255, 0.26);
+  animation: maintenance-orb-float 4.2s ease-in-out infinite;
+}
+
+.maintenance-orb-water {
+  position: absolute;
+  inset: 20% 0 0 0;
+  background: linear-gradient(180deg, rgba(59, 188, 255, 0.88) 0%, rgba(33, 129, 255, 0.94) 58%, rgba(20, 87, 197, 0.98) 100%);
+}
+
+.maintenance-orb-water .wave {
+  position: absolute;
+  left: -35%;
+  width: 170%;
+  height: 34%;
+  border-radius: 48%;
+  top: -20%;
+  background: rgba(186, 240, 255, 0.6);
+  animation: maintenance-orb-wave 5.2s linear infinite;
+}
+
+.maintenance-orb-water .wave-b {
+  top: -17%;
+  background: rgba(129, 216, 255, 0.42);
+  animation-duration: 7.2s;
+  animation-direction: reverse;
+}
+
+.maintenance-orb-bubbles span {
+  position: absolute;
+  bottom: -12%;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: rgba(212, 247, 255, 0.84);
+  box-shadow: 0 0 12px rgba(154, 229, 255, 0.82);
+  animation: maintenance-orb-bubble-rise 3.2s ease-in infinite;
+}
+
+.maintenance-orb-bubbles span:nth-child(1) { left: 12%; animation-delay: 0s; width: 7px; height: 7px; }
+.maintenance-orb-bubbles span:nth-child(2) { left: 22%; animation-delay: 0.32s; }
+.maintenance-orb-bubbles span:nth-child(3) { left: 32%; animation-delay: 0.68s; width: 8px; height: 8px; }
+.maintenance-orb-bubbles span:nth-child(4) { left: 42%; animation-delay: 1.05s; }
+.maintenance-orb-bubbles span:nth-child(5) { left: 53%; animation-delay: 1.44s; width: 12px; height: 12px; }
+.maintenance-orb-bubbles span:nth-child(6) { left: 63%; animation-delay: 1.76s; }
+.maintenance-orb-bubbles span:nth-child(7) { left: 73%; animation-delay: 2.02s; width: 8px; height: 8px; }
+.maintenance-orb-bubbles span:nth-child(8) { left: 83%; animation-delay: 2.4s; }
+.maintenance-orb-bubbles span:nth-child(9) { left: 17%; animation-delay: 2.62s; width: 9px; height: 9px; }
+.maintenance-orb-bubbles span:nth-child(10) { left: 38%; animation-delay: 2.85s; }
+.maintenance-orb-bubbles span:nth-child(11) { left: 58%; animation-delay: 3.1s; width: 7px; height: 7px; }
+.maintenance-orb-bubbles span:nth-child(12) { left: 78%; animation-delay: 3.34s; width: 11px; height: 11px; }
+
+.maintenance-orb-glass {
+  position: absolute;
+  inset: 7%;
+  border-radius: 50%;
+  border: 1px solid rgba(225, 248, 255, 0.28);
+  box-shadow: inset 0 0 18px rgba(203, 244, 255, 0.24);
+}
+
+.maintenance-liquid-orb strong {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #eaf8ff;
+  font-size: clamp(28px, 8vw, 44px);
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-shadow:
+    0 4px 16px rgba(0, 0, 0, 0.56),
+    0 0 16px rgba(149, 229, 255, 0.42);
+}
+
+.maintenance-simple-stage p {
+  margin: 0;
+  color: rgba(220, 244, 255, 0.92);
+  font-size: clamp(14px, 3.6vw, 18px);
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  text-shadow: 0 4px 16px rgba(0, 0, 0, 0.38);
+}
+
+@keyframes maintenance-simple-bg-drift {
+  0%,
+  100% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(2.2%, -2.4%, 0) scale(1.06); }
+}
+
+@keyframes maintenance-gear-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes maintenance-orb-float {
+  0%,
+  100% { transform: translateY(0px); }
+  50% { transform: translateY(-6px); }
+}
+
+@keyframes maintenance-orb-wave {
+  from { transform: translateX(0) rotate(0deg); }
+  to { transform: translateX(18%) rotate(360deg); }
+}
+
+@keyframes maintenance-orb-bubble-rise {
+  0% {
+    transform: translateY(0) scale(0.72);
+    opacity: 0;
+  }
+  18% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(-235px) scale(1.2);
+    opacity: 0;
+  }
+}
+
 @media (max-width: 560px) {
   .page-root {
     padding: 0;
@@ -3188,6 +3430,11 @@ button {
   .maintenance-hudline span,
   .maintenance-progress-bar i,
   .maintenance-log,
+  .maintenance-simple-bg,
+  .maintenance-gear,
+  .maintenance-liquid-orb,
+  .maintenance-orb-water .wave,
+  .maintenance-orb-bubbles span,
   .ds-bubble-wrap,
   .ds-bubble,
   .ds-selected-tools,

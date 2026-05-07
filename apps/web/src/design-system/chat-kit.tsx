@@ -306,7 +306,17 @@ export function MessageBubble({
         }}
       >
         <div className={cn("ds-reply-swipe-cue", swipeActive ? "is-visible" : undefined, swipeReady ? "is-ready" : undefined)}>
-          <span className="ds-reply-swipe-cue-icon">↩</span>
+          <span className="ds-reply-swipe-cue-icon" aria-hidden="true">
+            <svg viewBox="0 0 20 20" fill="none">
+              <path
+                d="M8.3 5.2 4.5 9l3.8 3.8M4.8 9h7.1a4.1 4.1 0 0 1 0 8.2h-2"
+                stroke="currentColor"
+                strokeWidth="1.9"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </span>
         </div>
         {selected && !item.deleted ? (
           <div

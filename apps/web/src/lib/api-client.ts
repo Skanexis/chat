@@ -70,6 +70,7 @@ type RequestOptions = {
   body?: JsonValue;
   auth?: boolean;
   allowRefresh?: boolean;
+  retryMode?: "safe" | "network_once" | "none";
 };
 
 export class ApiClientError extends Error {
@@ -170,7 +171,8 @@ export class ApiClient {
 
     return this.request<ChatMessage>(`/chats/${encodeURIComponent(chatId)}/messages`, {
       method: "POST",
-      body
+      body,
+      retryMode: "network_once"
     });
   }
 
@@ -179,13 +181,15 @@ export class ApiClient {
       method: "PATCH",
       body: {
         text
-      }
+      },
+      retryMode: "network_once"
     });
   }
 
   async deleteMessage(chatId: string, messageId: string): Promise<ChatMessage> {
     return this.request<ChatMessage>(`/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(messageId)}`, {
-      method: "DELETE"
+      method: "DELETE",
+      retryMode: "network_once"
     });
   }
 
@@ -1969,45 +1973,115 @@ export class ApiClient {
     const method = options.method ?? "GET";
     const auth = options.auth ?? true;
     const allowRefresh = options.allowRefresh ?? true;
+    const retryMode = options.retryMode ?? "safe";
+    const maxAttempts = this.resolveMaxAttempts(method, retryMode);
 
-    const headers: Record<string, string> = {};
-    if (options.body !== undefined) {
-      headers["content-type"] = "application/json";
-    }
-    if (auth && this.session?.accessToken) {
-      headers.authorization = `Bearer ${this.session.accessToken}`;
-    }
-
-    const response = await fetch(`${this.baseUrl}${path}`, {
-      method,
-      headers,
-      body: options.body !== undefined ? JSON.stringify(options.body) : undefined
-    });
-
-    if (response.status === 401 && auth && allowRefresh && this.session?.refreshToken) {
-      try {
-        await this.refreshSession();
-      } catch {
-        this.setSession(null);
-        throw new ApiClientError("Session expired. Re-authentication required.", 401);
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      const isLastAttempt = attempt >= maxAttempts;
+      const headers: Record<string, string> = {};
+      if (options.body !== undefined) {
+        headers["content-type"] = "application/json";
+      }
+      if (auth && this.session?.accessToken) {
+        headers.authorization = `Bearer ${this.session.accessToken}`;
       }
 
-      return this.request<T>(path, {
-        ...options,
-        allowRefresh: false
-      });
+      let response: Response;
+      try {
+        response = await fetch(`${this.baseUrl}${path}`, {
+          method,
+          headers,
+          body: options.body !== undefined ? JSON.stringify(options.body) : undefined
+        });
+      } catch (networkError) {
+        if (!isLastAttempt && this.canRetryNetworkError(retryMode)) {
+          await this.sleep(this.retryDelayMs(attempt));
+          continue;
+        }
+
+        if (networkError instanceof Error) {
+          throw new ApiClientError(`Network error: ${networkError.message}`, 0);
+        }
+        throw new ApiClientError("Network error: request failed", 0);
+      }
+
+      if (response.status === 401 && auth && allowRefresh && this.session?.refreshToken) {
+        try {
+          await this.refreshSession();
+        } catch {
+          this.setSession(null);
+          throw new ApiClientError("Session expired. Re-authentication required.", 401);
+        }
+
+        return this.request<T>(path, {
+          ...options,
+          allowRefresh: false
+        });
+      }
+
+      if (!response.ok) {
+        if (!isLastAttempt && this.canRetryHttpStatus(method, retryMode, response.status)) {
+          await this.sleep(this.retryDelayMs(attempt));
+          continue;
+        }
+        const message = await this.extractErrorMessage(response);
+        throw new ApiClientError(message, response.status);
+      }
+
+      if (response.status === 204) {
+        return undefined as T;
+      }
+
+      return (await response.json()) as T;
     }
 
-    if (!response.ok) {
-      const message = await this.extractErrorMessage(response);
-      throw new ApiClientError(message, response.status);
+    throw new ApiClientError("Request failed after retries.", 0);
+  }
+
+  private resolveMaxAttempts(method: RequestOptions["method"], retryMode: RequestOptions["retryMode"]): number {
+    if (retryMode === "none") {
+      return 1;
+    }
+    if (retryMode === "network_once") {
+      return 2;
     }
 
-    if (response.status === 204) {
-      return undefined as T;
+    // "safe": aggressively stabilize read paths and idempotent deletes.
+    if (method === "GET") {
+      return 3;
     }
+    if (method === "DELETE") {
+      return 2;
+    }
+    return 1;
+  }
 
-    return (await response.json()) as T;
+  private canRetryNetworkError(retryMode: RequestOptions["retryMode"]): boolean {
+    return retryMode === "safe" || retryMode === "network_once";
+  }
+
+  private canRetryHttpStatus(
+    method: RequestOptions["method"],
+    retryMode: RequestOptions["retryMode"],
+    statusCode: number
+  ): boolean {
+    if (retryMode !== "safe") {
+      return false;
+    }
+    if (method !== "GET" && method !== "DELETE") {
+      return false;
+    }
+    return statusCode === 408 || statusCode === 425 || statusCode === 429 || statusCode === 500 || statusCode === 502 || statusCode === 503 || statusCode === 504;
+  }
+
+  private retryDelayMs(attempt: number): number {
+    return Math.min(250 * 2 ** (attempt - 1), 1500);
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      setTimeout(resolve, ms);
+    });
   }
 
   private async extractErrorMessage(response: Response): Promise<string> {

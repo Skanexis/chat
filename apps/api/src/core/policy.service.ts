@@ -4,6 +4,37 @@ import { DATABASE_SERVICE } from "./database.service.js";
 import type { DatabaseService } from "./database.service.js";
 import type { ChatMember } from "./types.js";
 
+const DEV_ONLY_PERMISSIONS = new Set<string>([
+  "message.search",
+  "message.pin.view",
+  "draft.create",
+  "draft.update",
+  "draft.delete",
+  "draft.schedule_send",
+  "bookmark.create",
+  "bookmark.collection.manage",
+  "reminder.create",
+  "reminder.manage.own",
+  "read_receipt.view.own",
+  "read_receipt.view.any",
+  "read_receipt.privacy.manage",
+  "thread.subscription.manage",
+  "message.send.poll",
+  "poll.quiz.create",
+  "poll.quiz.close",
+  "poll.quiz.results.view",
+  "reputation.view",
+  "reputation.adjust",
+  "knowledge.article.create",
+  "knowledge.article.update",
+  "knowledge.article.publish",
+  "knowledge.article.archive",
+  "translation.use",
+  "translation.manage",
+  "e2e.device.register",
+  "e2e.device.view"
+]);
+
 @Injectable()
 export class PolicyService {
   constructor(@Inject(DATABASE_SERVICE) private readonly db: DatabaseService) {}
@@ -15,7 +46,11 @@ export class PolicyService {
 
   async hasPermission(chatId: string, member: ChatMember, permission: string): Promise<boolean> {
     const permissions = await this.getRolePermissions(chatId, member);
-    return permissions.has("*") || permissions.has(permission);
+    const isWildcard = permissions.has("*");
+    if (DEV_ONLY_PERMISSIONS.has(permission) && !isWildcard) {
+      return false;
+    }
+    return isWildcard || permissions.has(permission);
   }
 
   async assertCan(chatId: string, member: ChatMember, permission: string): Promise<void> {

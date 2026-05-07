@@ -471,11 +471,12 @@ export class InMemoryDatabase implements DatabaseService {
   async listMessages(chatId: string, options: ListMessagesOptions = {}): Promise<Message[]> {
     const before = options.before ?? null;
     const limit = options.limit ?? null;
+    const includeDeleted = options.includeDeleted ?? false;
     const messages = Array.from(this.messages.values())
       .filter(
         (message) =>
           message.chatId === chatId &&
-          !message.isDeleted &&
+          (includeDeleted || !message.isDeleted) &&
           (before === null || message.createdAt < before)
       )
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
