@@ -221,11 +221,22 @@ export class LimitsService {
     chatId: string;
     events: Array<{
       id: string;
-      action: "member.ban" | "member.unban";
+      action:
+        | "member.mute"
+        | "member.unmute"
+        | "member.timeout"
+        | "member.timeout.clear"
+        | "member.kick"
+        | "member.ban"
+        | "member.unban"
+        | "message.delete";
+      targetType: "member" | "message";
       actorId: string;
       targetId: string;
       reason: string | null;
       createdAt: string;
+      messageId: string | null;
+      deletedMessageText: string | null;
     }>;
   }> {
     const actor = await this.db.ensureMember(chatId, requestUser.userId);
@@ -234,20 +245,79 @@ export class LimitsService {
 
     const targetFilter = query.target_user_id?.trim() ?? "";
     const limit = query.limit ?? 120;
+    const moderationActions = new Set([
+      "member.mute",
+      "member.unmute",
+      "member.timeout",
+      "member.timeout.clear",
+      "member.kick",
+      "member.ban",
+      "member.unban"
+    ]);
     const all = await this.db.listAudit(chatId);
     const events = all
-      .filter((entry) => entry.targetType === "member" && (entry.action === "member.ban" || entry.action === "member.unban"))
-      .filter((entry) => (targetFilter ? entry.targetId.includes(targetFilter) : true))
+      .filter((entry) => {
+        if (entry.targetType === "member" && moderationActions.has(entry.action)) {
+          return true;
+        }
+        if (entry.targetType === "message" && entry.action === "message.delete") {
+          return true;
+        }
+        return false;
+      })
+      .filter((entry) => {
+        if (!targetFilter) {
+          return true;
+        }
+        if (entry.targetType === "member") {
+          return entry.targetId.includes(targetFilter);
+        }
+        const payload = entry.payload as Record<string, unknown>;
+        const deletedAuthorId = typeof payload.deletedAuthorId === "string" ? payload.deletedAuthorId : "";
+        const deletedDisplayAuthorId = typeof payload.deletedDisplayAuthorId === "string" ? payload.deletedDisplayAuthorId : "";
+        return deletedAuthorId.includes(targetFilter) || deletedDisplayAuthorId.includes(targetFilter);
+      })
       .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
       .slice(0, limit)
-      .map((entry) => ({
-        id: entry.id,
-        action: entry.action as "member.ban" | "member.unban",
-        actorId: entry.actorId,
-        targetId: entry.targetId,
-        reason: this.extractAuditReason(entry.payload),
-        createdAt: entry.createdAt
-      }));
+      .map((entry) => {
+        if (entry.targetType === "member") {
+          return {
+            id: entry.id,
+            action: entry.action as
+              | "member.mute"
+              | "member.unmute"
+              | "member.timeout"
+              | "member.timeout.clear"
+              | "member.kick"
+              | "member.ban"
+              | "member.unban",
+            targetType: "member" as const,
+            actorId: entry.actorId,
+            targetId: entry.targetId,
+            reason: this.extractAuditReason(entry.payload),
+            createdAt: entry.createdAt,
+            messageId: null,
+            deletedMessageText: null
+          };
+        }
+
+        const payload = entry.payload as Record<string, unknown>;
+        const deletedAuthorId =
+          (typeof payload.deletedAuthorId === "string" && payload.deletedAuthorId) ||
+          (typeof payload.deletedDisplayAuthorId === "string" && payload.deletedDisplayAuthorId) ||
+          entry.targetId;
+        return {
+          id: entry.id,
+          action: "message.delete" as const,
+          targetType: "message" as const,
+          actorId: entry.actorId,
+          targetId: deletedAuthorId,
+          reason: this.extractAuditReason(entry.payload),
+          createdAt: entry.createdAt,
+          messageId: entry.targetId,
+          deletedMessageText: this.extractDeletedMessageText(entry.payload)
+        };
+      });
 
     return {
       chatId,
@@ -393,5 +463,24 @@ export class LimitsService {
     }
     const normalized = raw.trim();
     return normalized.length > 0 ? normalized : null;
+  }
+
+  private extractDeletedMessageText(payload: Record<string, unknown>): string | null {
+    const text = typeof payload.deletedText === "string" ? payload.deletedText.trim() : "";
+    if (text.length > 0) {
+      return text.length > 240 ? `${text.slice(0, 240)}...` : text;
+    }
+    const mediaType = typeof payload.deletedMediaType === "string" ? payload.deletedMediaType.trim() : "";
+    const mediaUrl = typeof payload.deletedMediaUrl === "string" ? payload.deletedMediaUrl.trim() : "";
+    if (!mediaType && !mediaUrl) {
+      return null;
+    }
+    if (mediaType && mediaUrl) {
+      return `[${mediaType}] ${mediaUrl}`;
+    }
+    if (mediaType) {
+      return `[${mediaType}]`;
+    }
+    return mediaUrl || null;
   }
 }

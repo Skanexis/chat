@@ -249,11 +249,22 @@ export type MembersOverview = {
 
 export type ModerationHistoryEntry = {
   id: string;
-  action: "member.ban" | "member.unban";
+  action:
+    | "member.mute"
+    | "member.unmute"
+    | "member.timeout"
+    | "member.timeout.clear"
+    | "member.kick"
+    | "member.ban"
+    | "member.unban"
+    | "message.delete";
+  targetType: "member" | "message";
   actorId: string;
   targetId: string;
   reason: string | null;
   createdAt: string;
+  messageId: string | null;
+  deletedMessageText: string | null;
 };
 
 export type ModerationHistoryResponse = {

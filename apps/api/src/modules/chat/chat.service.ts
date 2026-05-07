@@ -298,7 +298,14 @@ export class ChatService {
       action: "message.delete",
       targetType: "message",
       targetId: messageId,
-      payload: {}
+      payload: {
+        deletedAuthorId: message.authorId,
+        deletedDisplayAuthorId: message.displayAuthorId,
+        deletedText: message.isEncrypted ? null : (message.text ?? null),
+        deletedMediaType: message.media?.type ?? null,
+        deletedMediaUrl: message.media?.url ?? null,
+        deletedCreatedAt: message.createdAt
+      }
     });
     const enriched = await this.enrichMessageWithAuthorInfo(chatId, deleted);
     this.eventBus.emit("message.deleted", enriched);

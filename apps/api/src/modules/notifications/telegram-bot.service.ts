@@ -17,6 +17,7 @@ type SendChannelMessageOptions = {
 @Injectable()
 export class TelegramBotService {
   private readonly logger = new Logger(TelegramBotService.name);
+  private cachedBotUsername: string | null = null;
 
   constructor(private readonly configService: ConfigService) {}
 
@@ -35,7 +36,7 @@ export class TelegramBotService {
     const apiUrl = `https://api.telegram.org/bot${botToken}/sendMessage`;
     const retryAttempts = this.parsePositiveInt(this.configService.get<string>("TELEGRAM_NOTIFY_RETRY_ATTEMPTS"), 3);
     const timeoutMs = this.parsePositiveInt(this.configService.get<string>("TELEGRAM_NOTIFY_TIMEOUT_MS"), 8000);
-    const miniAppUrl = this.resolveMiniAppUrl(options.chatId);
+    const miniAppUrl = await this.resolveMiniAppUrl(botToken, options.chatId);
     const payload: Record<string, unknown> = {
       chat_id: channelId,
       text,
@@ -127,20 +128,52 @@ export class TelegramBotService {
     return record.ok === true;
   }
 
-  private resolveMiniAppUrl(chatId: string | undefined): string | null {
+  private async resolveMiniAppUrl(botToken: string, chatId: string | undefined): Promise<string | null> {
     const explicitUrl = this.configService.get<string>("TELEGRAM_MINI_APP_URL")?.trim();
     if (explicitUrl) {
       return explicitUrl;
     }
 
-    const botUsername = this.configService.get<string>("TELEGRAM_BOT_USERNAME")?.trim().replace(/^@/, "");
+    let botUsername: string | null = this.configService.get<string>("TELEGRAM_BOT_USERNAME")?.trim().replace(/^@/, "") ?? null;
     if (!botUsername) {
+      botUsername = this.cachedBotUsername ?? (await this.fetchBotUsername(botToken));
+      if (botUsername) {
+        this.cachedBotUsername = botUsername;
+      }
+    }
+    if (!botUsername) {
+      this.logger.warn(
+        "Mini App button is skipped: TELEGRAM_MINI_APP_URL and TELEGRAM_BOT_USERNAME are not set, and bot username could not be resolved via getMe."
+      );
       return null;
     }
 
     const startAppRaw = this.configService.get<string>("TELEGRAM_MINI_APP_STARTAPP")?.trim();
     const startApp = startAppRaw && startAppRaw.length > 0 ? startAppRaw : (chatId?.trim() || "main");
     return `https://t.me/${botUsername}?startapp=${encodeURIComponent(startApp)}`;
+  }
+
+  private async fetchBotUsername(botToken: string): Promise<string | null> {
+    const timeoutMs = this.parsePositiveInt(this.configService.get<string>("TELEGRAM_NOTIFY_TIMEOUT_MS"), 8000);
+    const response = await this.postWithTimeout(`https://api.telegram.org/bot${botToken}/getMe`, timeoutMs, {});
+    if (!response?.ok) {
+      return null;
+    }
+    try {
+      const body = (await response.json()) as {
+        ok?: boolean;
+        result?: {
+          username?: string;
+        };
+      };
+      if (!body?.ok) {
+        return null;
+      }
+      const username = body.result?.username?.trim();
+      return username ? username.replace(/^@/, "") : null;
+    } catch {
+      return null;
+    }
   }
 
   private parsePositiveInt(raw: string | undefined, fallback: number): number {

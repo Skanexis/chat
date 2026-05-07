@@ -1,10 +1,11 @@
-import { redirect } from "next/navigation";
+import { AdminRouteSectionSwitch } from "@/components/chat/route-sections";
 
 export default async function AdminLegacyCatchAllPage({
   params
 }: Readonly<{
   params: Promise<{ chatId: string; legacy: string[] }>;
 }>) {
-  const { chatId } = await params;
-  redirect(`/chat/${encodeURIComponent(chatId)}/admin`);
+  const { legacy } = await params;
+  const routeKey = (legacy.at(-1) ?? "").toLowerCase();
+  return <AdminRouteSectionSwitch routeKey={routeKey} />;
 }
