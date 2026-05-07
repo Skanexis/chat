@@ -20,6 +20,9 @@ import type {
 type WsCallbacks = {
   onConnected?: () => void;
   onDisconnected?: (reason: string) => void;
+  onReconnecting?: (attempt: number) => void;
+  onReconnected?: (attempt: number) => void;
+  onReconnectFailed?: () => void;
   onSnapshot?: (payload: { chat: ChatView; messages: ChatMessage[] }) => void;
   onMessageCreated?: (message: ChatMessage) => void;
   onMessageUpdated?: (message: ChatMessage) => void;
@@ -48,6 +51,10 @@ export function connectChatSocket(apiBaseUrl: string, token: string, chatId: str
   const socket = io(`${getApiOrigin(apiBaseUrl)}/ws`, {
     path: "/ws/socket.io",
     transports: ["websocket", "polling"],
+    reconnection: true,
+    reconnectionAttempts: 20,
+    reconnectionDelay: 800,
+    reconnectionDelayMax: 5000,
     auth: {
       token
     }
@@ -58,6 +65,9 @@ export function connectChatSocket(apiBaseUrl: string, token: string, chatId: str
     socket.emit("chat.join", { chatId });
   });
   socket.on("disconnect", (reason: string) => callbacks.onDisconnected?.(reason));
+  socket.io.on("reconnect_attempt", (attempt: number) => callbacks.onReconnecting?.(attempt));
+  socket.io.on("reconnect", (attempt: number) => callbacks.onReconnected?.(attempt));
+  socket.io.on("reconnect_failed", () => callbacks.onReconnectFailed?.());
 
   socket.on("chat.snapshot", (payload: { chat: ChatView; messages: ChatMessage[] }) => callbacks.onSnapshot?.(payload));
   socket.on("message.created", (payload: ChatMessage) => callbacks.onMessageCreated?.(payload));

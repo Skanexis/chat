@@ -44,7 +44,25 @@ type MessageBubbleProps = {
 };
 
 const QUICK_REACTIONS = ["👍", "❤️", "🔥", "😂", "😮", "👏"] as const;
-const LINK_DETECT_REGEX = /(https?:\/\/[^\s<>"']+|www\.[^\s<>"']+|t\.me\/[^\s<>"']+)/gi;
+const LINK_DETECT_REGEX =
+  /(https?:\/\/[^\s<>"']+|www\.[^\s<>"']+|t\.me\/[^\s<>"']+|(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}(?:\/[^\s<>"']*)?)/gi;
+
+function isBareDomainCandidate(value: string): boolean {
+  return !/^https?:\/\//i.test(value) && !/^www\./i.test(value) && !/^t\.me\//i.test(value);
+}
+
+function hasSafeDomainBoundary(text: string, start: number, end: number): boolean {
+  const prev = start > 0 ? text[start - 1] ?? "" : "";
+  const next = end < text.length ? text[end] ?? "" : "";
+
+  if (prev && /[@\w/]/.test(prev)) {
+    return false;
+  }
+  if (next && /[\w]/.test(next)) {
+    return false;
+  }
+  return true;
+}
 
 function parseLinkCandidate(raw: string): { href: string; label: string; suffix: string } | null {
   let label = raw;
@@ -83,10 +101,16 @@ function renderTextWithLinks(text: string): ReactNode[] {
       nodes.push(text.slice(lastIndex, start));
     }
     const raw = match[0] ?? "";
+    const end = start + raw.length;
+    if (isBareDomainCandidate(raw) && !hasSafeDomainBoundary(text, start, end)) {
+      nodes.push(raw);
+      lastIndex = end;
+      continue;
+    }
     const parsed = parseLinkCandidate(raw);
     if (!parsed) {
       nodes.push(raw);
-      lastIndex = start + raw.length;
+      lastIndex = end;
       continue;
     }
     nodes.push(
@@ -106,7 +130,7 @@ function renderTextWithLinks(text: string): ReactNode[] {
     if (parsed.suffix) {
       nodes.push(parsed.suffix);
     }
-    lastIndex = start + raw.length;
+    lastIndex = end;
   }
   if (lastIndex < text.length) {
     nodes.push(text.slice(lastIndex));
@@ -126,12 +150,20 @@ export function MessageBubble({
   onEdit,
   onDelete
 }: MessageBubbleProps) {
+  const SWIPE_REPLY_THRESHOLD = 62;
+  const SWIPE_REPLY_MAX_OFFSET = 96;
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressTriggeredRef = useRef(false);
   const swipeStartXRef = useRef<number | null>(null);
   const swipeStartYRef = useRef<number | null>(null);
-  const swipeTriggeredRef = useRef(false);
+  const swipeWasDraggingRef = useRef(false);
+  const swipeProgressRef = useRef(0);
   const [showDeletedContent, setShowDeletedContent] = useState(false);
+  const [swipeOffsetX, setSwipeOffsetX] = useState(0);
+  const [swipeCueProgress, setSwipeCueProgress] = useState(0);
+
+  const swipeReady = swipeCueProgress >= 0.985;
+  const swipeActive = Math.abs(swipeOffsetX) > 0.5;
 
   function clearLongPressTimer(): void {
     if (longPressTimerRef.current) {
@@ -147,11 +179,39 @@ export function MessageBubble({
     return window.matchMedia("(pointer: coarse)").matches;
   }
 
+  function resetSwipeState(): void {
+    swipeStartXRef.current = null;
+    swipeStartYRef.current = null;
+    swipeWasDraggingRef.current = false;
+    swipeProgressRef.current = 0;
+    setSwipeOffsetX(0);
+    setSwipeCueProgress(0);
+  }
+
   return (
-    <article className={cn("ds-bubble-wrap", item.own ? "is-own" : undefined, selected ? "is-selected" : undefined)}>
+    <article
+      className={cn(
+        "ds-bubble-wrap",
+        item.own ? "is-own" : undefined,
+        selected ? "is-selected" : undefined,
+        swipeActive ? "is-swiping" : undefined
+      )}
+    >
       {!item.own ? <Avatar size="sm" name={item.authorName} className="ds-bubble-avatar" /> : null}
       <div
-        className={cn("ds-bubble", item.own ? "ds-bubble-own" : "ds-bubble-guest")}
+        className={cn(
+          "ds-bubble",
+          item.own ? "ds-bubble-own" : "ds-bubble-guest",
+          swipeActive ? "is-dragging" : undefined,
+          swipeReady ? "is-reply-ready" : undefined
+        )}
+        style={
+          swipeActive
+            ? {
+                transform: `translateX(${swipeOffsetX}px)`
+              }
+            : undefined
+        }
         role="button"
         tabIndex={0}
         onClick={() => {
@@ -160,6 +220,10 @@ export function MessageBubble({
           }
           if (longPressTriggeredRef.current) {
             longPressTriggeredRef.current = false;
+            return;
+          }
+          if (swipeWasDraggingRef.current) {
+            swipeWasDraggingRef.current = false;
             return;
           }
           onSelect?.();
@@ -171,7 +235,10 @@ export function MessageBubble({
         onTouchStart={(event) => {
           clearLongPressTimer();
           longPressTriggeredRef.current = false;
-          swipeTriggeredRef.current = false;
+          swipeWasDraggingRef.current = false;
+          swipeProgressRef.current = 0;
+          setSwipeOffsetX(0);
+          setSwipeCueProgress(0);
           const touch = event.touches[0];
           swipeStartXRef.current = touch?.clientX ?? null;
           swipeStartYRef.current = touch?.clientY ?? null;
@@ -181,7 +248,7 @@ export function MessageBubble({
           }, 360);
         }}
         onTouchMove={(event) => {
-          if (swipeTriggeredRef.current || !onReply) {
+          if (!onReply) {
             return;
           }
           const touch = event.touches[0];
@@ -196,23 +263,40 @@ export function MessageBubble({
           if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
             clearLongPressTimer();
           }
-          const directionMatch = item.own ? dx <= -62 : dx >= 62;
-          if (directionMatch && Math.abs(dx) > Math.abs(dy) * 1.3) {
-            swipeTriggeredRef.current = true;
-            longPressTriggeredRef.current = true;
-            clearLongPressTimer();
-            onReply();
+
+          const horizontalIntent = Math.abs(dx) > Math.abs(dy) * 1.15;
+          if (!horizontalIntent) {
+            return;
           }
+
+          const directionalDx = item.own ? -dx : dx;
+          if (directionalDx <= 0) {
+            if (swipeActive) {
+              swipeProgressRef.current = 0;
+              setSwipeOffsetX(0);
+              setSwipeCueProgress(0);
+            }
+            return;
+          }
+
+          const clampedOffset = Math.max(0, Math.min(SWIPE_REPLY_MAX_OFFSET, directionalDx));
+          const normalizedProgress = Math.min(1, clampedOffset / SWIPE_REPLY_THRESHOLD);
+          swipeWasDraggingRef.current = true;
+          swipeProgressRef.current = normalizedProgress;
+          setSwipeOffsetX(item.own ? -clampedOffset : clampedOffset);
+          setSwipeCueProgress(normalizedProgress);
         }}
         onTouchEnd={() => {
           clearLongPressTimer();
-          swipeStartXRef.current = null;
-          swipeStartYRef.current = null;
+          if (swipeProgressRef.current >= 0.985 && onReply) {
+            longPressTriggeredRef.current = true;
+            onReply();
+          }
+          resetSwipeState();
         }}
         onTouchCancel={() => {
           clearLongPressTimer();
-          swipeStartXRef.current = null;
-          swipeStartYRef.current = null;
+          resetSwipeState();
         }}
         onKeyDown={(event) => {
           if (event.key === "Enter" || event.key === " ") {
@@ -221,6 +305,9 @@ export function MessageBubble({
           }
         }}
       >
+        <div className={cn("ds-reply-swipe-cue", swipeActive ? "is-visible" : undefined, swipeReady ? "is-ready" : undefined)}>
+          <span className="ds-reply-swipe-cue-icon">↩</span>
+        </div>
         {selected && !item.deleted ? (
           <div
             className="ds-bubble-popover"

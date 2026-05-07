@@ -34,6 +34,7 @@ export type UiMessage = ChatMessage & {
 };
 
 export type LoadState = "initializing" | "ready" | "error";
+export type WsStatus = "connecting" | "online" | "reconnecting" | "offline";
 
 export type UiError = {
   message: string;
@@ -45,6 +46,8 @@ type ChatRuntimeValue = {
   state: LoadState;
   error: UiError | null;
   wsConnected: boolean;
+  wsStatus: WsStatus;
+  wsReconnectAttempt: number | null;
   session: Session | null;
   chat: ChatView | null;
   identities: ChatIdentity[];
@@ -168,6 +171,8 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
   const [sending, setSending] = useState(false);
   const [replyToMessageId, setReplyToMessageId] = useState<string | null>(null);
   const [wsConnected, setWsConnected] = useState(false);
+  const [wsStatus, setWsStatus] = useState<WsStatus>("connecting");
+  const [wsReconnectAttempt, setWsReconnectAttempt] = useState<number | null>(null);
   const [senderMode, setSenderMode] = useState<SenderModeValue>("as_user");
 
   const currentUserId = session?.user.id ?? null;
@@ -233,6 +238,9 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
         initTelegramViewport();
         setState("initializing");
         setError(null);
+        setWsConnected(false);
+        setWsStatus("connecting");
+        setWsReconnectAttempt(null);
         setTypingUsers([]);
         setLiveTicketsById({});
         setLiveAutomationExecutions([]);
@@ -299,13 +307,41 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
         socketRef.current = connectChatSocket(appConfig.apiBaseUrl, activeSession.accessToken, chatId, {
           onConnected: () => {
             setWsConnected(true);
+            setWsStatus("online");
+            setWsReconnectAttempt(null);
             markWsEvent();
             invalidate("invites");
             invalidate("webhooks");
             invalidate("threadSubscriptions");
             invalidate("reputation");
           },
-          onDisconnected: () => setWsConnected(false),
+          onDisconnected: (reason) => {
+            setWsConnected(false);
+            setWsStatus(reason === "io server disconnect" ? "offline" : "reconnecting");
+          },
+          onReconnecting: (attempt) => {
+            setWsConnected(false);
+            setWsStatus("reconnecting");
+            setWsReconnectAttempt(attempt);
+          },
+          onReconnected: (attempt) => {
+            setWsConnected(true);
+            setWsStatus("online");
+            setWsReconnectAttempt(null);
+            markWsEvent();
+            invalidate("invites");
+            invalidate("webhooks");
+            invalidate("threadSubscriptions");
+            invalidate("reputation");
+            if (attempt > 0) {
+              setError(null);
+            }
+          },
+          onReconnectFailed: () => {
+            setWsConnected(false);
+            setWsStatus("offline");
+            setError({ message: "WS reconnect failed. Tap reload to restore live updates." });
+          },
           onSnapshot: (payload) => {
             setChat(payload.chat);
             setMessages(payload.messages.map((message) => ({ ...message })));
@@ -432,6 +468,7 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
           },
           onError: (message) => {
             setWsConnected(false);
+            setWsStatus("reconnecting");
             const normalized = message.trim().toLowerCase();
             // Ignore transient transport errors while auto-reconnect is in progress.
             if (normalized === "websocket error" || normalized === "xhr poll error") {
@@ -457,6 +494,9 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
       alive = false;
       socketRef.current?.disconnect();
       socketRef.current = null;
+      setWsConnected(false);
+      setWsStatus("offline");
+      setWsReconnectAttempt(null);
       if (typingStopTimerRef.current) {
         clearTimeout(typingStopTimerRef.current);
         typingStopTimerRef.current = null;
@@ -504,7 +544,7 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
     return options;
   }, [canUseGroupSender, canUseRoleProfileSender, groupIdentity, roleProfileIdentity]);
 
-  const canSend = chat?.member.status === "active" && canSendText;
+  const canSend = chat?.member.status === "active" && canSendText && wsConnected;
   const restrictionText =
     chat?.member.status === "muted"
       ? "You are muted in this chat. Sending is temporarily disabled."
@@ -512,9 +552,11 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
         ? "This room is read-only for your role."
         : chat?.member.status === "banned"
           ? "You are banned from posting in this room."
-          : chat?.member.status === "active" && !canSendText
-            ? "Your role has read-only access with reactions only."
-          : null;
+        : chat?.member.status === "active" && !canSendText
+          ? "Your role has read-only access with reactions only."
+          : !wsConnected
+            ? "Realtime connection is restoring. Sending is temporarily paused to avoid message loss."
+            : null;
 
   function applyBootstrap(bootstrap: BootstrapResponse): void {
     setChat(bootstrap.chat);
@@ -540,6 +582,10 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
 
     const text = draft.trim();
     if (!text) {
+      return;
+    }
+    if (!wsConnected) {
+      setError({ message: "WS reconnecting. Please wait until connection is online before sending." });
       return;
     }
 
@@ -689,6 +735,8 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
       state,
       error,
       wsConnected,
+      wsStatus,
+      wsReconnectAttempt,
       session,
       chat,
       identities,
@@ -772,7 +820,9 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
       state,
       typingUsers,
       wsLastEventAt,
-      wsConnected
+      wsConnected,
+      wsStatus,
+      wsReconnectAttempt
     ]
   );
 

@@ -287,7 +287,7 @@ describe("ChatGateway", () => {
     gateway.server.to = vi.fn(() => roomEmitter) as never;
 
     eventBus.emit(
-      "message.created",
+      "member.updated",
       {
         chatId: "main"
       } as never
@@ -296,7 +296,7 @@ describe("ChatGateway", () => {
 
     gateway.onModuleDestroy();
     eventBus.emit(
-      "message.created",
+      "member.updated",
       {
         chatId: "main"
       } as never

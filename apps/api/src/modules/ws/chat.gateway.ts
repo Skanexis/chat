@@ -10,7 +10,7 @@ import {
 } from "@nestjs/websockets";
 import { ConfigService } from "@nestjs/config";
 import { JwtService } from "@nestjs/jwt";
-import { OnModuleDestroy, UnauthorizedException } from "@nestjs/common";
+import { Logger, OnModuleDestroy, UnauthorizedException } from "@nestjs/common";
 import type { Server, Socket } from "socket.io";
 
 import { EventBusService } from "../../core/event-bus.service.js";
@@ -52,6 +52,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   @WebSocketServer()
   server!: Server;
 
+  private readonly logger = new Logger(ChatGateway.name);
   private detachListeners: Array<() => void> = [];
   private readonly wsRateBucket = new Map<string, { count: number; resetAtMs: number }>();
   private wsRateLastCleanupAtMs = 0;
@@ -84,17 +85,17 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
     this.detachListeners.push(
       this.eventBus.on("message.created", (payload) => {
-        void this.broadcastMessageEventForRoom("message.created", payload);
+        this.runBackgroundTask("message.created", () => this.broadcastMessageEventForRoom("message.created", payload));
       })
     );
     this.detachListeners.push(
       this.eventBus.on("message.updated", (payload) => {
-        void this.broadcastMessageEventForRoom("message.updated", payload);
+        this.runBackgroundTask("message.updated", () => this.broadcastMessageEventForRoom("message.updated", payload));
       })
     );
     this.detachListeners.push(
       this.eventBus.on("message.deleted", (payload) => {
-        void this.broadcastMessageEventForRoom("message.deleted", payload);
+        this.runBackgroundTask("message.deleted", () => this.broadcastMessageEventForRoom("message.deleted", payload));
       })
     );
     this.detachListeners.push(
@@ -300,16 +301,28 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
     await Promise.all(
       Array.from(room).map(async (socketId) => {
-        const socket = this.server.sockets.sockets.get(socketId) as ClientSocket | undefined;
-        const user = socket?.data.user;
-        if (!socket || !user) {
-          return;
-        }
+        try {
+          const socket = this.server.sockets.sockets.get(socketId) as ClientSocket | undefined;
+          const user = socket?.data.user;
+          if (!socket || !user) {
+            return;
+          }
 
-        const sanitized = await this.chatService.sanitizeDeletedMessageForUser(payload.chatId, user, payload);
-        socket.emit(eventName, sanitized);
+          const sanitized = await this.chatService.sanitizeDeletedMessageForUser(payload.chatId, user, payload);
+          socket.emit(eventName, sanitized);
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : "unknown socket broadcast error";
+          this.logger.warn(`WS broadcast skipped for ${eventName} socket=${socketId}: ${reason}`);
+        }
       })
     );
+  }
+
+  private runBackgroundTask(name: string, task: () => Promise<void>): void {
+    void task().catch((error: unknown) => {
+      const reason = error instanceof Error ? error.message : "unexpected background task error";
+      this.logger.warn(`WS background task '${name}' failed: ${reason}`);
+    });
   }
 
   private parsePositiveIntConfig(rawValue: string | undefined, fallback: number): number {

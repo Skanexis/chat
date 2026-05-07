@@ -348,6 +348,7 @@ function PanelErrorState({ error, onRetry }: { error: PanelError; onRetry: () =>
 
 export function ChatMainSection() {
   const runtime = useChatRuntime();
+  const chatMainRef = useRef<HTMLElement | null>(null);
   const feedRef = useRef<HTMLDivElement | null>(null);
   const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null);
   const [isNearBottom, setIsNearBottom] = useState(true);
@@ -377,8 +378,43 @@ export function ChatMainSection() {
     }
   }, [runtime.messages, selectedMessageId]);
 
+  useEffect(() => {
+    if (!selectedMessageId) {
+      return;
+    }
+
+    function handleGlobalPointerDown(event: PointerEvent): void {
+      const root = chatMainRef.current;
+      if (!root) {
+        return;
+      }
+      const target = event.target;
+      if (!(target instanceof Node)) {
+        return;
+      }
+      if (!root.contains(target)) {
+        setSelectedMessageId(null);
+        return;
+      }
+      if (!(target instanceof Element)) {
+        return;
+      }
+      const isMessageSurface = Boolean(
+        target.closest(".ds-bubble, .ds-bubble-popover, .ds-reaction-pill, .ds-reaction-btn, .ds-action-row button")
+      );
+      if (!isMessageSurface) {
+        setSelectedMessageId(null);
+      }
+    }
+
+    document.addEventListener("pointerdown", handleGlobalPointerDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", handleGlobalPointerDown, true);
+    };
+  }, [selectedMessageId]);
+
   return (
-    <section className="chat-main">
+    <section className="chat-main" ref={chatMainRef}>
       <PinnedBanner message="Welcome to Ristoranti Chat. Follow the rules and use role-aware sender mode when needed." />
       <div
         className="chat-feed"
@@ -420,7 +456,7 @@ export function ChatMainSection() {
                       }
                       return {
                         author: resolveAuthorLabel(target, runtime.currentUserId),
-                text: getMessagePreview(target)
+                        text: getMessagePreview(target)
                       };
                     })()
                   : null,
