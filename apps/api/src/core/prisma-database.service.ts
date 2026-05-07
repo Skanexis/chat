@@ -2478,7 +2478,8 @@ export class PrismaDatabaseService implements DatabaseService {
         },
         update: {
           chatId: MAIN_CHAT_ID,
-          isSystem: true
+          isSystem: true,
+          permissions: BASE_OWNER_PERMISSIONS
         }
       });
       await tx.role.upsert({

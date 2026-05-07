@@ -573,7 +573,7 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
     return options;
   }, [canUseGroupSender, canUseRoleProfileSender, groupIdentity, roleProfileIdentity]);
 
-  const canSend = chat?.member.status === "active" && (canSendText || canDeleteAnyMessages);
+  const canSend = chat?.member.status !== "banned" && (canSendText || canDeleteAnyMessages);
   const restrictionText =
     chat?.member.status === "muted"
       ? "You are muted in this chat. Sending is temporarily disabled."
@@ -616,9 +616,9 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
       return;
     }
     if (!canSendText && canDeleteAnyMessages) {
-      const normalized = text.toLowerCase();
-      if (normalized !== "/purge" && normalized !== "/purge *" && normalized !== "/purge all") {
-        setError({ message: "Only /purge command is allowed for your role.", statusCode: 403 });
+      const normalized = text.trim();
+      if (!/^\/pur(?:ge|e)(?:@[a-zA-Z0-9_]+)?(?:\s+(?:\*|all))?$/i.test(normalized)) {
+        setError({ message: "Only /purge (or /pure) command is allowed for your role.", statusCode: 403 });
         return;
       }
     }

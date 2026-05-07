@@ -64,7 +64,7 @@ describe("ChatService message permission matrix", () => {
     await expect(chatService.deleteMessage("main", created.id, userA)).resolves.toMatchObject({ isDeleted: true });
   });
 
-  it("allows admin with message.delete.any to purge chat via /purge command", async () => {
+  it("allows admin with message.delete.any to purge chat via /purge command alias", async () => {
     const { db, chatService } = createChatServiceFixture();
     const regularA = await makeRequestUser(db, 501003, "regular_a");
     const regularB = await makeRequestUser(db, 501004, "regular_b");
@@ -99,7 +99,7 @@ describe("ChatService message permission matrix", () => {
 
     const result = await chatService.createMessage("main", admin, {
       sender_mode: "as_user",
-      text: "/purge"
+      text: "/pure"
     });
     expect(result.text).toContain("Chat purged:");
 

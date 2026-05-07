@@ -41,7 +41,11 @@ export class PolicyService {
 
   async getRolePermissions(chatId: string, member: ChatMember): Promise<Set<string>> {
     const role = await this.db.getRole(chatId, member.roleId);
-    return new Set(role.permissions);
+    const permissions = new Set(role.permissions);
+    if (role.id === "role_main_owner") {
+      permissions.add("*");
+    }
+    return permissions;
   }
 
   async hasPermission(chatId: string, member: ChatMember, permission: string): Promise<boolean> {

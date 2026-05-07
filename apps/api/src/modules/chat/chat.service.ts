@@ -717,12 +717,12 @@ export class ChatService {
     if (dto.media || dto.encrypted_payload || !dto.text) {
       return false;
     }
-    const normalized = dto.text.trim().toLowerCase();
-    return normalized === "/purge" || normalized === "/purge *" || normalized === "/purge all";
+    const normalized = dto.text.trim();
+    return /^\/pur(?:ge|e)(?:@[a-zA-Z0-9_]+)?(?:\s+(?:\*|all))?$/i.test(normalized);
   }
 
   private async purgeChat(chatId: string, requestUser: RequestUser, member: ChatMember): Promise<MessageView> {
-    this.policy.assertMemberCanOperate(member);
+    this.policy.assertMemberCanAccess(member);
     await this.policy.assertCan(chatId, member, "message.delete.any");
 
     const allMessages = await this.db.listMessages(chatId, { includeDeleted: true });
