@@ -194,8 +194,6 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
     (permissions: string[]): boolean => permissionSet.has("*") || permissions.some((permission) => permissionSet.has(permission)),
     [permissionSet]
   );
-  const normalizedRole = roleName.toLowerCase();
-  const isOwnerLike = normalizedRole.includes("owner") || normalizedRole.includes("creator");
   const isDeveloper = permissionSet.has("*");
   const isMaintenanceBypass =
     permissionSet.has("*") || (permissionSet.has("incident_mode.enable") && permissionSet.has("incident_mode.disable"));
@@ -221,7 +219,7 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
       permission === "message.pin" ||
       permission === "message.pin.view"
     );
-  const isAdmin = isOwnerLike || isAdminByPermission;
+  const isAdmin = isAdminByPermission;
   const isModerator = isAdmin || isModeratorByPermission;
   const canDeleteAnyMessages = permissionSet.has("*") || permissionSet.has("message.delete.any");
   const canViewDeletedMessages =

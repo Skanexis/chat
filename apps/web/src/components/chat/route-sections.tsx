@@ -1905,7 +1905,7 @@ export function ChannelNotifyAdminSection() {
   const runtime = useChatRuntime();
   const api = useAuthedApi();
 
-  const [state, setState] = useState<GlobalUiState>("ready");
+  const [state, setState] = useState<GlobalUiState>("loading");
   const [updating, setUpdating] = useState(false);
   const [error, setError] = useState<PanelError | null>(null);
   const [config, setConfig] = useState<ChannelNotifyConfig | null>(null);
@@ -2008,9 +2008,8 @@ export function ChannelNotifyAdminSection() {
     setUpdating(true);
     setError(null);
     try {
-      const next = await api.updateChannelNotifyConfig(runtime.chatId, patch);
-      syncConfig(next);
-      setState("ready");
+      await api.updateChannelNotifyConfig(runtime.chatId, patch);
+      await loadConfig();
     } catch (saveError) {
       setError(parseError(saveError));
       setState("error");
@@ -4948,6 +4947,11 @@ export function LimitsAdminSection() {
 export function MembersAdminSection() {
   const runtime = useChatRuntime();
   const api = useAuthedApi();
+  const canAssignRoles = runtime.hasAnyPermission(["role.assign", "role.unassign"]);
+  const canMute = runtime.hasPermission("member.mute");
+  const canKick = runtime.hasPermission("member.kick");
+  const canBan = runtime.hasPermission("member.ban");
+  const canUnban = runtime.hasPermission("member.unban");
   const [overview, setOverview] = useState<MembersOverview | null>(null);
   const [roles, setRoles] = useState<ChatRole[]>([]);
   const [moderationHistory, setModerationHistory] = useState<ModerationHistoryEntry[]>([]);
@@ -5217,124 +5221,82 @@ export function MembersAdminSection() {
                     {member.mutedUntil ? <span>Muted until: {formatDateTime(member.mutedUntil)}</span> : null}
                     {member.bannedUntil ? <span>Banned until: {formatDateTime(member.bannedUntil)}</span> : null}
                   </div>
-                  <div className="panel-inline-form">
-                    <select
-                      value={roleDraftByUserId[member.userId] ?? member.roleId}
-                      onChange={(event) =>
-                        setRoleDraftByUserId((prev) => ({
-                          ...prev,
-                          [member.userId]: event.target.value
-                        }))
-                      }
-                    >
-                      {roles.map((role) => (
-                        <option key={`${member.userId}:${role.id}`} value={role.id}>
-                          {role.name} (p{role.priority})
-                        </option>
-                      ))}
-                    </select>
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={() => void handleSetRole(member.userId)}
-                      disabled={!roleDraftByUserId[member.userId] || roleDraftByUserId[member.userId] === member.roleId}
-                    >
-                      Set role
-                    </Button>
-                  </div>
+                  {canAssignRoles ? (
+                    <div className="panel-inline-form">
+                      <select
+                        value={roleDraftByUserId[member.userId] ?? member.roleId}
+                        onChange={(event) =>
+                          setRoleDraftByUserId((prev) => ({
+                            ...prev,
+                            [member.userId]: event.target.value
+                          }))
+                        }
+                      >
+                        {roles.map((role) => (
+                          <option key={`${member.userId}:${role.id}`} value={role.id}>
+                            {role.name} (p{role.priority})
+                          </option>
+                        ))}
+                      </select>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => void handleSetRole(member.userId)}
+                        disabled={!roleDraftByUserId[member.userId] || roleDraftByUserId[member.userId] === member.roleId}
+                      >
+                        Set role
+                      </Button>
+                    </div>
+                  ) : null}
                   <div className="panel-actions">
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={() =>
-                        void withMemberAction(
-                          member.userId,
-                          (reason) => api.muteMember(runtime.chatId, member.userId, reason),
-                          "manual mute"
-                        )
-                      }
-                    >
-                      Mute
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={() =>
-                        void withMemberAction(
-                          member.userId,
-                          (reason) => api.timeoutMember(runtime.chatId, member.userId, 300, reason),
-                          "timeout"
-                        )
-                      }
-                    >
-                      Timeout 5m
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={() =>
-                        void withMemberAction(
-                          member.userId,
-                          (reason) => api.clearMemberTimeout(runtime.chatId, member.userId, reason),
-                          "clear timeout"
-                        )
-                      }
-                    >
-                      Clear timeout
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={() =>
-                        void withMemberAction(
-                          member.userId,
-                          (reason) => api.unmuteMember(runtime.chatId, member.userId, reason),
-                          "manual unmute"
-                        )
-                      }
-                    >
-                      Unmute
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="danger"
-                      onClick={() =>
-                        void withMemberAction(member.userId, (reason) => api.kickMember(runtime.chatId, member.userId, reason), "kick")
-                      }
-                    >
-                      Kick
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="danger"
-                      onClick={() =>
-                        void withMemberAction(member.userId, (reason) => api.banMember(runtime.chatId, member.userId, reason), "ban")
-                      }
-                    >
-                      Ban
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={() =>
-                        void withMemberAction(member.userId, (reason) => api.unbanMember(runtime.chatId, member.userId, reason), "unban")
-                      }
-                    >
-                      Unban
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={() =>
-                        void withMemberAction(
-                          member.userId,
-                          () => api.unassignRole(runtime.chatId, member.roleId, member.userId),
-                          "unassign role"
-                        )
-                      }
-                    >
-                      Unassign role
-                    </Button>
+                    {canMute ? (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() =>
+                          void withMemberAction(
+                            member.userId,
+                            (reason) => api.muteMember(runtime.chatId, member.userId, reason),
+                            "manual mute"
+                          )
+                        }
+                      >
+                        Mute
+                      </Button>
+                    ) : null}
+                    {canKick ? (
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        onClick={() =>
+                          void withMemberAction(member.userId, (reason) => api.kickMember(runtime.chatId, member.userId, reason), "kick")
+                        }
+                      >
+                        Kick
+                      </Button>
+                    ) : null}
+                    {canBan ? (
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        onClick={() =>
+                          void withMemberAction(member.userId, (reason) => api.banMember(runtime.chatId, member.userId, reason), "ban")
+                        }
+                      >
+                        Ban
+                      </Button>
+                    ) : null}
+                    {canUnban ? (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() =>
+                          void withMemberAction(member.userId, (reason) => api.unbanMember(runtime.chatId, member.userId, reason), "unban")
+                        }
+                      >
+                        Unban
+                      </Button>
+                    ) : null}
                   </div>
                 </article>
                 ))}
