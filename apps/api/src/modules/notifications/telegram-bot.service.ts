@@ -129,9 +129,12 @@ export class TelegramBotService {
   }
 
   private async resolveMiniAppUrl(botToken: string, chatId: string | undefined): Promise<string | null> {
+    const miniAppShortName = this.normalizeMiniAppShortName(
+      this.configService.get<string>("TELEGRAM_MINI_APP_SHORT_NAME")?.trim() ?? "chat"
+    );
     const explicitUrl = this.configService.get<string>("TELEGRAM_MINI_APP_URL")?.trim();
     if (explicitUrl) {
-      return explicitUrl;
+      return this.normalizeTelegramMiniAppUrl(explicitUrl, miniAppShortName);
     }
 
     let botUsername: string | null = this.configService.get<string>("TELEGRAM_BOT_USERNAME")?.trim().replace(/^@/, "") ?? null;
@@ -150,7 +153,7 @@ export class TelegramBotService {
 
     const startAppRaw = this.configService.get<string>("TELEGRAM_MINI_APP_STARTAPP")?.trim();
     const startApp = startAppRaw && startAppRaw.length > 0 ? startAppRaw : (chatId?.trim() || "main");
-    return `https://t.me/${botUsername}?startapp=${encodeURIComponent(startApp)}`;
+    return `https://t.me/${botUsername}/${miniAppShortName}?startapp=${encodeURIComponent(startApp)}`;
   }
 
   private async fetchBotUsername(botToken: string): Promise<string | null> {
@@ -182,5 +185,28 @@ export class TelegramBotService {
       return fallback;
     }
     return Math.floor(parsed);
+  }
+
+  private normalizeMiniAppShortName(raw: string): string {
+    const cleaned = raw.trim().replace(/^\/+/, "").replace(/\/+$/, "");
+    return cleaned.length > 0 ? cleaned : "chat";
+  }
+
+  private normalizeTelegramMiniAppUrl(explicitUrl: string, shortName: string): string {
+    try {
+      const parsed = new URL(explicitUrl);
+      if (parsed.hostname !== "t.me") {
+        return explicitUrl;
+      }
+
+      const segments = parsed.pathname.split("/").filter((segment) => segment.length > 0);
+      if (segments.length === 1) {
+        parsed.pathname = `/${segments[0]}/${shortName}`;
+        return parsed.toString();
+      }
+      return explicitUrl;
+    } catch {
+      return explicitUrl;
+    }
   }
 }

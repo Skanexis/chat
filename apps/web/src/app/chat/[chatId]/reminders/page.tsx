@@ -1,5 +1,5 @@
-import { RemindersSection } from "@/components/chat/route-sections";
+import { notFound } from "next/navigation";
 
 export default function ChatRemindersPage() {
-  return <RemindersSection />;
+  notFound();
 }

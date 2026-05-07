@@ -69,6 +69,8 @@ export const BASE_ADMIN_PERMISSIONS = [
   "reminder.manage.own",
   "thread.subscription.manage",
   "channel.notify.enable",
+  "channel.notify.disable",
+  "channel.notify.frequency.edit",
   "channel.notify.template.edit",
   "integration.webhook.create",
   "integration.webhook.rotate_secret",

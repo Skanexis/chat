@@ -1,4 +1,4 @@
-import { Body, Controller, Param, Patch, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Param, Patch, Post, UseGuards } from "@nestjs/common";
 
 import { CurrentUser } from "../../core/current-user.decorator.js";
 import { JwtAuthGuard } from "../../core/jwt-auth.guard.js";
@@ -10,6 +10,11 @@ import { TestChannelNotifyDto, UpdateChannelNotifyConfigDto } from "./notificati
 @Controller("chats/:chatId/channel-notify")
 export class NotificationsController {
   constructor(private readonly notificationsService: NotificationsService) {}
+
+  @Get("config")
+  async getConfig(@Param("chatId") chatId: string, @CurrentUser() user: RequestUser) {
+    return this.notificationsService.getChannelNotifyConfig(chatId, user);
+  }
 
   @Patch("config")
   async updateConfig(

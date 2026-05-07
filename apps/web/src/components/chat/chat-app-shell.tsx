@@ -110,38 +110,84 @@ export function ChatAppShell({ children }: ChatAppShellProps) {
     `${rootPath}/e2e-devices`
   ]);
   const memberRestrictedPaths = new Set<string>([]);
-  const showMainNav = runtime.isAdmin || runtime.isModerator;
+  const adminSurfacePermissions = [
+    "member.view_list",
+    "role.create",
+    "role.update",
+    "role.assign",
+    "role.unassign",
+    "permission.grant",
+    "permission.revoke",
+    "limit.view",
+    "limit.update.role",
+    "slowmode.view",
+    "slowmode.update",
+    "chat.invite.create",
+    "chat.invite.revoke",
+    "member.approve_join",
+    "member.reject_join",
+    "channel.notify.enable",
+    "channel.notify.disable",
+    "channel.notify.frequency.edit",
+    "channel.notify.template.edit",
+    "ticket.create",
+    "ticket.assign",
+    "ticket.close",
+    "ticket.sla.manage",
+    "room.temp.create",
+    "room.temp.archive",
+    "room.temp.restore",
+    "broadcast.create",
+    "broadcast.update",
+    "broadcast.delete",
+    "broadcast.publish.now",
+    "broadcast.schedule",
+    "broadcast.pause",
+    "broadcast.resume",
+    "broadcast.cancel",
+    "broadcast.audience.manage",
+    "broadcast.template.manage",
+    "broadcast.stats.view",
+    "integration.webhook.create",
+    "integration.webhook.rotate_secret",
+    "integration.webhook.disable",
+    "automation.rule.create",
+    "automation.rule.update",
+    "automation.rule.execute",
+    "incident_mode.enable",
+    "incident_mode.disable",
+    "incident_mode.policy.edit",
+    "audit.view",
+    "audit.export"
+  ];
+  const devSurfacePermissions = [
+    "message.search",
+    "message.pin.view",
+    "draft.create",
+    "draft.update",
+    "draft.delete",
+    "draft.schedule_send",
+    "bookmark.create",
+    "bookmark.collection.manage",
+    "thread.subscription.manage",
+    "message.send.poll",
+    "poll.quiz.create",
+    "poll.quiz.close",
+    "poll.quiz.results.view",
+    "e2e.device.register",
+    "e2e.device.view"
+  ];
+  const canOpenAdminByPermissions = runtime.hasAnyPermission(adminSurfacePermissions);
+  const canOpenDevByPermissions = runtime.isDeveloper && runtime.hasAnyPermission(devSurfacePermissions);
+  const showMainNav = canOpenAdminByPermissions || canOpenDevByPermissions;
   const mainNavItems = showMainNav
-    ? runtime.isDeveloper
-      ? [
-          { label: "Chat", href: rootPath },
-          { label: "DEV", href: `${rootPath}/admin` }
-        ]
-      : runtime.isAdmin
-        ? [
-            { label: "Chat", href: rootPath },
-            { label: "Admin", href: `${rootPath}/admin` }
-          ]
-        : [{ label: "Chat", href: rootPath }]
+    ? [
+        { label: "Chat", href: rootPath },
+        { label: canOpenDevByPermissions ? "DEV" : "Admin", href: `${rootPath}/admin` }
+      ]
     : [];
   const workspaceNavItems: Array<{ label: string; href: string }> = [];
   const adminNavItems: Array<{ label: string; href: string }> = [];
-
-  if (!runtime.isAdmin && runtime.isModerator) {
-    workspaceNavItems.push({ label: "Search", href: `${rootPath}/search` });
-    workspaceNavItems.push({ label: "Pinned", href: `${rootPath}/pinned` });
-    workspaceNavItems.push({ label: "Drafts", href: `${rootPath}/drafts` });
-    workspaceNavItems.push({ label: "Bookmarks", href: `${rootPath}/bookmarks` });
-    workspaceNavItems.push({ label: "Reminders", href: `${rootPath}/reminders` });
-    workspaceNavItems.push({ label: "Receipts", href: `${rootPath}/read-receipts` });
-    workspaceNavItems.push({ label: "Threads", href: `${rootPath}/thread-subscriptions` });
-    workspaceNavItems.push({ label: "Polls", href: `${rootPath}/polls` });
-    workspaceNavItems.push({ label: "Reputation", href: `${rootPath}/reputation` });
-  }
-
-  if (!runtime.isAdmin && runtime.isModerator) {
-    adminNavItems.push({ label: "Moderation", href: `${rootPath}/admin` });
-  }
 
   const showFooterNav = mainNavItems.length > 0 || workspaceNavItems.length > 0 || adminNavItems.length > 0;
 
@@ -220,7 +266,7 @@ export function ChatAppShell({ children }: ChatAppShellProps) {
     );
   }
 
-  if (!runtime.isModerator && memberRestrictedPaths.has(normalizedPathname)) {
+  if (!runtime.hasPermission("member.view_list") && memberRestrictedPaths.has(normalizedPathname)) {
     return (
       <section className="app-shell">
         <ErrorSurface

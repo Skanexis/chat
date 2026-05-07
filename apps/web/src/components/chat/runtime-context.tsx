@@ -79,9 +79,12 @@ type ChatRuntimeValue = {
   replyToMessageId: string | null;
   senderMode: SenderModeValue;
   roleName: string;
+  permissions: string[];
   isDeveloper: boolean;
   isAdmin: boolean;
   isModerator: boolean;
+  hasPermission: (permission: string) => boolean;
+  hasAnyPermission: (permissions: string[]) => boolean;
   canDeleteAnyMessages: boolean;
   canViewDeletedMessages: boolean;
   canSend: boolean;
@@ -183,37 +186,43 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
   const roleName = chat?.member.role.name ?? "member";
   const rolePermissions = chat?.member.role.permissions ?? [];
   const permissionSet = useMemo(() => new Set(rolePermissions), [rolePermissions]);
+  const hasPermission = useCallback(
+    (permission: string): boolean => permissionSet.has("*") || permissionSet.has(permission),
+    [permissionSet]
+  );
+  const hasAnyPermission = useCallback(
+    (permissions: string[]): boolean => permissionSet.has("*") || permissions.some((permission) => permissionSet.has(permission)),
+    [permissionSet]
+  );
   const normalizedRole = roleName.toLowerCase();
   const isOwnerLike = normalizedRole.includes("owner") || normalizedRole.includes("creator");
   const isDeveloper = permissionSet.has("*");
   const isMaintenanceBypass =
     permissionSet.has("*") || (permissionSet.has("incident_mode.enable") && permissionSet.has("incident_mode.disable"));
-  const isAdminByName = normalizedRole.includes("admin") || isOwnerLike;
   const isAdminByPermission =
     permissionSet.has("*") ||
     rolePermissions.some((permission) =>
       permission.startsWith("role.") ||
-      permission.startsWith("invite.") ||
-      permission.startsWith("channel_notify.") ||
+      permission.startsWith("chat.invite.") ||
+      permission.startsWith("channel.notify.") ||
       permission.startsWith("broadcast.") ||
-      permission.startsWith("webhook.") ||
+      permission.startsWith("integration.webhook.") ||
       permission.startsWith("automation.") ||
       permission.startsWith("incident_mode.") ||
       permission.startsWith("audit.")
     );
-  const isModeratorByName = normalizedRole.includes("moderator");
   const isModeratorByPermission =
     permissionSet.has("*") ||
     rolePermissions.some((permission) =>
       permission.startsWith("member.") ||
       permission.startsWith("ticket.") ||
-      permission.startsWith("temp_room.") ||
+      permission.startsWith("room.temp.") ||
       permission === "message.search" ||
       permission === "message.pin" ||
       permission === "message.pin.view"
     );
-  const isAdmin = isAdminByName || isAdminByPermission;
-  const isModerator = isAdmin || isModeratorByName || isModeratorByPermission;
+  const isAdmin = isOwnerLike || isAdminByPermission;
+  const isModerator = isAdmin || isModeratorByPermission;
   const canDeleteAnyMessages = permissionSet.has("*") || permissionSet.has("message.delete.any");
   const canViewDeletedMessages =
     permissionSet.has("*") || permissionSet.has("message.deleted.view") || permissionSet.has("message.delete.any");
@@ -779,9 +788,12 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
       replyToMessageId,
       senderMode,
       roleName,
+      permissions: rolePermissions,
       isDeveloper,
       isAdmin,
       isModerator,
+      hasPermission,
+      hasAnyPermission,
       canDeleteAnyMessages,
       canViewDeletedMessages,
       canSend,
@@ -831,6 +843,7 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
       replyToMessageId,
       restrictionText,
       roleName,
+      rolePermissions,
       isDeveloper,
       senderMode,
       senderOptions,
@@ -842,7 +855,9 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
       wsConnected,
       wsStatus,
       wsReconnectAttempt,
-      wsReconnectStartedAt
+      wsReconnectStartedAt,
+      hasPermission,
+      hasAnyPermission
     ]
   );
 

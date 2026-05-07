@@ -1,4 +1,4 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { ForbiddenException, Inject, Injectable } from "@nestjs/common";
 
 import { DATABASE_SERVICE } from "../../core/database.service.js";
 import type { DatabaseService } from "../../core/database.service.js";
@@ -15,6 +15,24 @@ export class NotificationsService {
     private readonly policy: PolicyService,
     private readonly botService: TelegramBotService
   ) {}
+
+  async getChannelNotifyConfig(chatId: string, requestUser: RequestUser) {
+    const member = await this.db.ensureMember(chatId, requestUser.userId);
+    this.policy.assertMemberCanOperate(member);
+
+    const [canEnable, canDisable, canEditTemplate, canEditFrequency] = await Promise.all([
+      this.policy.hasPermission(chatId, member, "channel.notify.enable"),
+      this.policy.hasPermission(chatId, member, "channel.notify.disable"),
+      this.policy.hasPermission(chatId, member, "channel.notify.template.edit"),
+      this.policy.hasPermission(chatId, member, "channel.notify.frequency.edit")
+    ]);
+
+    if (!canEnable && !canDisable && !canEditTemplate && !canEditFrequency) {
+      throw new ForbiddenException("Permission denied: channel.notify.config.read");
+    }
+
+    return this.db.getChannelNotifyConfig(chatId);
+  }
 
   async updateChannelNotifyConfig(chatId: string, requestUser: RequestUser, dto: UpdateChannelNotifyConfigDto) {
     const member = await this.db.ensureMember(chatId, requestUser.userId);

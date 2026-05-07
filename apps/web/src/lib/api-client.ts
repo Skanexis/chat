@@ -459,6 +459,12 @@ export class ApiClient {
     });
   }
 
+  async getChannelNotifyConfig(chatId: string): Promise<ChannelNotifyConfig> {
+    return this.request<ChannelNotifyConfig>(`/chats/${encodeURIComponent(chatId)}/channel-notify/config`, {
+      method: "GET"
+    });
+  }
+
   async testChannelNotify(
     chatId: string,
     payload: {

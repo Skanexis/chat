@@ -1,5 +1,5 @@
-import { ReadReceiptsSection } from "@/components/chat/route-sections";
+import { notFound } from "next/navigation";
 
 export default function ChatReadReceiptsPage() {
-  return <ReadReceiptsSection />;
+  notFound();
 }

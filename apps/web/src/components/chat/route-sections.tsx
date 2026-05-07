@@ -246,6 +246,8 @@ const ROLE_PERMISSION_GROUPS: Array<{ label: string; permissions: string[] }> = 
       "limit.view",
       "limit.update.role",
       "channel.notify.enable",
+      "channel.notify.disable",
+      "channel.notify.frequency.edit",
       "broadcast.create",
       "broadcast.approve",
       "integration.webhook.create",
@@ -417,12 +419,15 @@ const ROLE_PERMISSION_PRESETS: Record<string, string[]> = {
     "role.unassign",
     "permission.grant",
     "permission.revoke",
-    "limit.view",
-    "limit.update.role",
-    "channel.notify.enable",
-    "broadcast.create",
-    "automation.rule.create",
-    "incident_mode.enable",
+      "limit.view",
+      "limit.update.role",
+      "channel.notify.enable",
+      "channel.notify.disable",
+      "channel.notify.frequency.edit",
+      "channel.notify.template.edit",
+      "broadcast.create",
+      "automation.rule.create",
+      "incident_mode.enable",
     "audit.view"
   ],
   owner_all: ["*"]
@@ -1912,6 +1917,10 @@ export function ChannelNotifyAdminSection() {
   const [digestIntervalMinutes, setDigestIntervalMinutes] = useState("60");
   const [messagePreview, setMessagePreview] = useState("Test channel notification");
   const [deliver, setDeliver] = useState(false);
+  const canEnableNotify = runtime.hasPermission("channel.notify.enable");
+  const canDisableNotify = runtime.hasPermission("channel.notify.disable");
+  const canEditNotifyTemplate = runtime.hasPermission("channel.notify.template.edit");
+  const canEditNotifyFrequency = runtime.hasPermission("channel.notify.frequency.edit");
 
   function syncConfig(next: ChannelNotifyConfig): void {
     setConfig(next);
@@ -1921,6 +1930,23 @@ export function ChannelNotifyAdminSection() {
     setDigestIntervalMinutes(String(next.digestIntervalMinutes));
   }
 
+  const loadConfig = useCallback(async (): Promise<void> => {
+    setState("loading");
+    setError(null);
+    try {
+      const next = await api.getChannelNotifyConfig(runtime.chatId);
+      syncConfig(next);
+      setState("ready");
+    } catch (loadError) {
+      setError(parseError(loadError));
+      setState("error");
+    }
+  }, [api, runtime.chatId]);
+
+  useEffect(() => {
+    void loadConfig();
+  }, [loadConfig]);
+
   async function handleSaveConfig(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     const digest = Number(digestIntervalMinutes);
@@ -1929,15 +1955,60 @@ export function ChannelNotifyAdminSection() {
       return;
     }
 
+    const trimmedTemplate = template.trim();
+    const patch: {
+      enabled?: boolean;
+      mode?: "off" | "instant" | "digest";
+      template?: string;
+      digestIntervalMinutes?: number;
+    } = {};
+    const baseline = config;
+
+    if (!baseline || enabled !== baseline.enabled) {
+      if (enabled && !canEnableNotify) {
+        setError({ message: "Missing permission: channel.notify.enable" });
+        return;
+      }
+      if (!enabled && !canDisableNotify) {
+        setError({ message: "Missing permission: channel.notify.disable" });
+        return;
+      }
+      patch.enabled = enabled;
+    }
+
+    if (!baseline || mode !== baseline.mode) {
+      if (!canEditNotifyFrequency) {
+        setError({ message: "Missing permission: channel.notify.frequency.edit" });
+        return;
+      }
+      patch.mode = mode;
+    }
+
+    if (!baseline || Math.floor(digest) !== baseline.digestIntervalMinutes) {
+      if (!canEditNotifyFrequency) {
+        setError({ message: "Missing permission: channel.notify.frequency.edit" });
+        return;
+      }
+      patch.digestIntervalMinutes = Math.floor(digest);
+    }
+
+    if (!baseline || trimmedTemplate !== baseline.template) {
+      if (!canEditNotifyTemplate) {
+        setError({ message: "Missing permission: channel.notify.template.edit" });
+        return;
+      }
+      patch.template = trimmedTemplate;
+    }
+
+    if (Object.keys(patch).length === 0) {
+      setError({ message: "No changes to save." });
+      return;
+    }
+
     setUpdating(true);
     setError(null);
     try {
-      const next = await api.updateChannelNotifyConfig(runtime.chatId, {
-        enabled,
-        mode,
-        template: template.trim(),
-        digestIntervalMinutes: Math.floor(digest)
-      });
+      const next = await api.updateChannelNotifyConfig(runtime.chatId, patch);
       syncConfig(next);
       setState("ready");
     } catch (saveError) {
@@ -1971,28 +2042,40 @@ export function ChannelNotifyAdminSection() {
   if (state !== "ready" && state !== "updating") {
     return (
       <Card className="app-tab-card">
-        {error ? <PanelErrorState error={error} onRetry={() => setState("ready")} /> : <StateBlock state={state} />}
+        {error ? <PanelErrorState error={error} onRetry={() => void loadConfig()} /> : <StateBlock state={state} />}
       </Card>
     );
   }
 
   return (
-    <PermissionGate allowed={runtime.isAdmin} hint="Admin permissions are required for this section.">
+    <PermissionGate
+      allowed={runtime.hasAnyPermission(ADMIN_ROUTE_PERMISSION_BY_KEY["channel-notify"] ?? [])}
+      hint="Channel notify permissions are required for this section."
+    >
       <StateBlock state={updating ? "updating" : "ready"}>
         <AdminPageScaffold title="Channel Notify Config" subtitle="Connected to /channel-notify/config and /channel-notify/test.">
           <AdminNavChips />
           {error ? <RestrictionHint message={error.message} variant="danger" /> : null}
 
           <section className="panel-subcard">
-            <SectionTitle title="Config Patch" subtitle="No read endpoint yet; this panel stores the latest PATCH/TEST response." />
+            <SectionTitle title="Config Patch" subtitle="Loaded from /channel-notify/config and persisted with PATCH." />
             <form className="panel-form" onSubmit={handleSaveConfig}>
               <label>
-                <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />
+                <input
+                  type="checkbox"
+                  checked={enabled}
+                  onChange={(event) => setEnabled(event.target.checked)}
+                  disabled={enabled ? !canDisableNotify : !canEnableNotify}
+                />
                 {" "}Enabled
               </label>
               <label>
                 Mode
-                <select value={mode} onChange={(event) => setMode(event.target.value as "off" | "instant" | "digest")}>
+                <select
+                  value={mode}
+                  onChange={(event) => setMode(event.target.value as "off" | "instant" | "digest")}
+                  disabled={!canEditNotifyFrequency}
+                >
                   <option value="off">off</option>
                   <option value="instant">instant</option>
                   <option value="digest">digest</option>
@@ -2006,14 +2089,28 @@ export function ChannelNotifyAdminSection() {
                   max={1440}
                   value={digestIntervalMinutes}
                   onChange={(event) => setDigestIntervalMinutes(event.target.value)}
+                  disabled={!canEditNotifyFrequency}
                 />
               </label>
               <label>
                 Template
-                <textarea value={template} onChange={(event) => setTemplate(event.target.value)} rows={4} />
+                <textarea
+                  value={template}
+                  onChange={(event) => setTemplate(event.target.value)}
+                  rows={4}
+                  disabled={!canEditNotifyTemplate}
+                />
               </label>
               <div className="panel-actions">
-                <Button type="submit">Save config</Button>
+                <Button
+                  type="submit"
+                  disabled={
+                    updating ||
+                    (!canEnableNotify && !canDisableNotify && !canEditNotifyTemplate && !canEditNotifyFrequency)
+                  }
+                >
+                  Save config
+                </Button>
               </div>
             </form>
           </section>
@@ -2036,7 +2133,7 @@ export function ChannelNotifyAdminSection() {
           </section>
 
           <section className="panel-subcard">
-            <SectionTitle title="Last Known Config" subtitle="Most recent config payload received in this UI session." />
+            <SectionTitle title="Last Known Config" subtitle="Current persisted config loaded from backend." />
             {config ? (
               <div className="panel-list">
                 <article className="panel-item">
@@ -2445,7 +2542,10 @@ export function KnowledgeSection() {
   }
 
   return (
-    <PermissionGate allowed={runtime.isModerator} hint="Moderator permissions are required for this section.">
+    <PermissionGate
+      allowed={runtime.hasAnyPermission(ADMIN_ROUTE_PERMISSION_BY_KEY.knowledge ?? [])}
+      hint="Knowledge permissions are required for this section."
+    >
       <StateBlock state={updating ? "updating" : "ready"}>
         <Card className="app-tab-card">
           <SectionTitle title="Knowledge Articles" subtitle="Connected to /knowledge/articles create and update contracts." />
@@ -2636,7 +2736,10 @@ export function TranslationsSection() {
   }
 
   return (
-    <PermissionGate allowed={runtime.isModerator} hint="Moderator permissions are required for this section.">
+    <PermissionGate
+      allowed={runtime.hasAnyPermission(ADMIN_ROUTE_PERMISSION_BY_KEY.translations ?? [])}
+      hint="Translation permissions are required for this section."
+    >
       <StateBlock state={updating ? "updating" : "ready"}>
         <Card className="app-tab-card">
           <SectionTitle title="Translations" subtitle="Connected to /messages/:messageId/translate and /translations." />
@@ -2848,7 +2951,10 @@ export function MemberMetaAdminSection() {
   }
 
   return (
-    <PermissionGate allowed={runtime.isModerator} hint="Moderator permissions are required for this section.">
+    <PermissionGate
+      allowed={runtime.hasAnyPermission(ADMIN_ROUTE_PERMISSION_BY_KEY["member-meta"] ?? [])}
+      hint="Member profile permissions are required for this section."
+    >
       <StateBlock state={updating ? "updating" : "ready"}>
         <AdminPageScaffold title="Member Tags and Profile Fields" subtitle="Connected to /members/:id/tags and /profile-fields.">
           <AdminNavChips />
@@ -3057,7 +3163,10 @@ export function E2EDevicesSection() {
   }, [loadOwnDevices]);
 
   return (
-    <PermissionGate allowed={runtime.isModerator} hint="Moderator permissions are required for this section.">
+    <PermissionGate
+      allowed={runtime.hasAnyPermission(ADMIN_ROUTE_PERMISSION_BY_KEY["e2e-devices"] ?? [])}
+      hint="E2E device permissions are required for this section."
+    >
       <StateBlock state={updating ? "updating" : "ready"}>
         <Card className="app-tab-card">
           <SectionTitle title="E2E Devices" subtitle="Connected to /e2e/devices register/list/deactivate endpoints." />
@@ -3280,7 +3389,10 @@ export function TempRoomsAdminSection() {
   }
 
   return (
-    <PermissionGate allowed={runtime.isModerator} hint="Moderator permissions are required for this section.">
+    <PermissionGate
+      allowed={runtime.hasAnyPermission(ADMIN_ROUTE_PERMISSION_BY_KEY["temp-rooms"] ?? [])}
+      hint="Temporary room permissions are required for this section."
+    >
       <StateBlock state={updating ? "updating" : "ready"}>
         <AdminPageScaffold title="Temporary Rooms" subtitle="Connected to /temp-rooms create/archive/restore endpoints.">
           <AdminNavChips />
@@ -3453,7 +3565,10 @@ export function ReputationSection() {
   }
 
   return (
-    <PermissionGate allowed={runtime.isModerator} hint="Moderator permissions are required for reputation adjustments.">
+    <PermissionGate
+      allowed={runtime.hasAnyPermission(ADMIN_ROUTE_PERMISSION_BY_KEY.reputation ?? [])}
+      hint="Reputation permissions are required for this section."
+    >
       <StateBlock state={updating ? "updating" : "ready"}>
         <Card className="app-tab-card">
           <SectionTitle title="Reputation" subtitle="Connected to /reputation/adjust with live WS feed reputation.updated." />
@@ -3552,9 +3667,46 @@ type AdminRouteDefinition = {
   description: string;
   href: string;
   group: AdminRouteGroupId;
-  admin?: boolean;
-  moderator?: boolean;
   devOnly?: boolean;
+};
+
+const ADMIN_ROUTE_PERMISSION_BY_KEY: Record<string, string[]> = {
+  members: ["member.view_list"],
+  roles: ["role.create", "role.update", "role.assign", "role.unassign", "permission.grant", "permission.revoke"],
+  limits: ["limit.view", "limit.update.role", "slowmode.view", "slowmode.update"],
+  invites: ["chat.invite.create", "chat.invite.revoke", "member.approve_join", "member.reject_join"],
+  "channel-notify": [
+    "channel.notify.enable",
+    "channel.notify.disable",
+    "channel.notify.template.edit",
+    "channel.notify.frequency.edit"
+  ],
+  tickets: ["ticket.create", "ticket.assign", "ticket.close", "ticket.sla.manage"],
+  "temp-rooms": ["room.temp.create", "room.temp.archive", "room.temp.restore"],
+  broadcasts: [
+    "broadcast.create",
+    "broadcast.update",
+    "broadcast.delete",
+    "broadcast.publish.now",
+    "broadcast.schedule",
+    "broadcast.pause",
+    "broadcast.resume",
+    "broadcast.cancel",
+    "broadcast.audience.manage",
+    "broadcast.template.manage",
+    "broadcast.stats.view"
+  ],
+  webhooks: ["integration.webhook.create", "integration.webhook.rotate_secret", "integration.webhook.disable"],
+  automation: ["automation.rule.create", "automation.rule.update", "automation.rule.execute"],
+  incident: ["incident_mode.enable", "incident_mode.disable", "incident_mode.policy.edit"],
+  audit: ["audit.view", "audit.export"],
+  search: ["message.search"],
+  pinned: ["message.pin.view"],
+  drafts: ["draft.create", "draft.update", "draft.delete", "draft.schedule_send"],
+  bookmarks: ["bookmark.create", "bookmark.collection.manage"],
+  "thread-subscriptions": ["thread.subscription.manage"],
+  polls: ["message.send.poll", "poll.quiz.create", "poll.quiz.close", "poll.quiz.results.view"],
+  "e2e-devices": ["e2e.device.register", "e2e.device.view"]
 };
 
 const ADMIN_GROUP_META: Record<AdminRouteGroupId, { label: string; subtitle: string }> = {
@@ -3587,104 +3739,84 @@ function getAdminRouteDefinitions(chatId: string): AdminRouteDefinition[] {
       label: "Members",
       description: "Role assignment, moderation and member search.",
       href: `${base}/members`,
-      group: "core",
-      moderator: true
+      group: "core"
     },
     {
       key: "roles",
       label: "Roles",
       description: "Role builder, permissions and presets.",
       href: `${base}/roles`,
-      group: "core",
-      admin: true
+      group: "core"
     },
     {
       key: "limits",
       label: "Limits",
       description: "Rate limits, slowmode and anti-spam thresholds.",
       href: `${base}/limits`,
-      group: "core",
-      admin: true
+      group: "core"
     },
     {
       key: "invites",
       label: "Invites",
       description: "Join policy, invite links and pending requests.",
       href: `${base}/invites`,
-      group: "core",
-      admin: true
+      group: "core"
     },
     {
       key: "channel-notify",
       label: "Notify",
       description: "Bot notifications for new messages in Telegram.",
       href: `${base}/channel-notify`,
-      group: "core",
-      admin: true
+      group: "core"
     },
     {
       key: "tickets",
       label: "Tickets",
       description: "Support queue, SLA and assignment workflow.",
       href: `${base}/tickets`,
-      group: "ops",
-      moderator: true
+      group: "ops"
     },
     {
       key: "temp-rooms",
       label: "TempRooms",
       description: "Create/archive/restore temporary rooms.",
       href: `${base}/temp-rooms`,
-      group: "ops",
-      moderator: true
-    },
-    {
-      key: "member-meta",
-      label: "MemberMeta",
-      description: "Tags and profile fields for members.",
-      href: `${base}/member-meta`,
-      group: "ops",
-      moderator: true
+      group: "ops"
     },
     {
       key: "broadcasts",
       label: "Broadcasts",
       description: "Audience campaigns and delivery control.",
       href: `${base}/broadcasts`,
-      group: "ops",
-      admin: true
+      group: "ops"
     },
     {
       key: "webhooks",
       label: "Webhooks",
       description: "Inbound integration endpoints and secrets.",
       href: `${base}/webhooks`,
-      group: "ops",
-      admin: true
+      group: "ops"
     },
     {
       key: "automation",
       label: "Automation",
       description: "Rules, execution logs and operational flows.",
       href: `${base}/automation`,
-      group: "ops",
-      admin: true
+      group: "ops"
     },
     {
       key: "incident",
       label: "Incident",
       description: "Maintenance/incident mode switches and policy lock.",
       href: `${base}/incident`,
-      group: "governance",
-      admin: true
+      group: "governance"
     },
     {
       key: "audit",
       label: "Audit",
       description: "History exports and compliance traces.",
       href: `${base}/audit`,
-      group: "governance",
-      admin: true
+      group: "governance"
     },
     {
       key: "search",
@@ -3719,22 +3851,6 @@ function getAdminRouteDefinitions(chatId: string): AdminRouteDefinition[] {
       devOnly: true
     },
     {
-      key: "reminders",
-      label: "Reminders",
-      description: "Reminder queue and management.",
-      href: `${root}/reminders`,
-      group: "dev",
-      devOnly: true
-    },
-    {
-      key: "read-receipts",
-      label: "Receipts",
-      description: "Read receipt privacy and visibility.",
-      href: `${root}/read-receipts`,
-      group: "dev",
-      devOnly: true
-    },
-    {
       key: "thread-subscriptions",
       label: "Threads",
       description: "Thread alert subscriptions and triggers.",
@@ -3751,30 +3867,6 @@ function getAdminRouteDefinitions(chatId: string): AdminRouteDefinition[] {
       devOnly: true
     },
     {
-      key: "reputation",
-      label: "Reputation",
-      description: "Reputation adjustments and live WS events.",
-      href: `${root}/reputation`,
-      group: "dev",
-      devOnly: true
-    },
-    {
-      key: "knowledge",
-      label: "Knowledge",
-      description: "Knowledge base content management.",
-      href: `${root}/knowledge`,
-      group: "dev",
-      devOnly: true
-    },
-    {
-      key: "translations",
-      label: "Translate",
-      description: "Translation tools and language ops.",
-      href: `${root}/translations`,
-      group: "dev",
-      devOnly: true
-    },
-    {
       key: "e2e-devices",
       label: "E2E",
       description: "E2E device registry and diagnostics.",
@@ -3787,21 +3879,22 @@ function getAdminRouteDefinitions(chatId: string): AdminRouteDefinition[] {
 
 type RuntimePermissionShape = {
   isDeveloper: boolean;
-  isAdmin: boolean;
-  isModerator: boolean;
+  hasAnyPermission: (permissions: string[]) => boolean;
 };
+
+function canAccessAdminRouteKey(runtime: RuntimePermissionShape, key: string): boolean {
+  const requiredPermissions = ADMIN_ROUTE_PERMISSION_BY_KEY[key];
+  if (!requiredPermissions || requiredPermissions.length === 0) {
+    return true;
+  }
+  return runtime.hasAnyPermission(requiredPermissions);
+}
 
 function canAccessAdminRoute(runtime: RuntimePermissionShape, route: AdminRouteDefinition): boolean {
   if (route.devOnly) {
-    return runtime.isDeveloper;
+    return runtime.isDeveloper && canAccessAdminRouteKey(runtime, route.key);
   }
-  if (route.admin) {
-    return runtime.isAdmin;
-  }
-  if (route.moderator) {
-    return runtime.isModerator;
-  }
-  return true;
+  return canAccessAdminRouteKey(runtime, route.key);
 }
 
 function resolveAdminActiveGroup(pathname: string, base: string, routes: AdminRouteDefinition[]): AdminRouteGroupId {
@@ -3865,9 +3958,10 @@ function AdminNavChips() {
 export function AdminDirectorySection() {
   const runtime = useChatRuntime();
   const routes = getAdminRouteDefinitions(runtime.chatId).filter((route) => canAccessAdminRoute(runtime, route));
+  const canOpenDirectory = routes.length > 0;
 
   return (
-    <PermissionGate allowed={runtime.isModerator} hint="Moderator permissions are required for this section.">
+    <PermissionGate allowed={canOpenDirectory} hint="You do not have permissions for admin sections in this workspace.">
       <AdminPageScaffold title="Admin Control Center" subtitle="Grouped routing for fast navigation without long pages.">
         <AdminNavChips />
         {ADMIN_GROUP_ORDER.map((groupId) => {
@@ -3896,15 +3990,15 @@ export function AdminDirectorySection() {
 
 export function AdminGroupSection({ groupId }: { groupId: AdminRouteGroupId }) {
   const runtime = useChatRuntime();
-  const canOpenGroup = runtime.isModerator && (groupId !== "dev" || runtime.isDeveloper);
   const routes = getAdminRouteDefinitions(runtime.chatId)
     .filter((route) => canAccessAdminRoute(runtime, route))
     .filter((route) => route.group === groupId);
+  const canOpenGroup = routes.length > 0;
 
   return (
     <PermissionGate
       allowed={canOpenGroup}
-      hint={groupId === "dev" ? "Developer role is required for this section." : "Moderator permissions are required for this section."}
+      hint="You do not have permissions for this admin group."
     >
       <AdminPageScaffold title={`${ADMIN_GROUP_META[groupId].label} Tools`} subtitle={ADMIN_GROUP_META[groupId].subtitle}>
         <AdminNavChips />
@@ -3959,9 +4053,6 @@ export function AdminRouteSectionSwitch({ routeKey }: { routeKey: string }) {
     case "temp-rooms":
     case "temprooms":
       return <TempRoomsAdminSection />;
-    case "member-meta":
-    case "membermeta":
-      return <MemberMetaAdminSection />;
     case "broadcasts":
       return <BroadcastsAdminSection />;
     case "webhooks":
@@ -4040,7 +4131,7 @@ export function AdminHubSection() {
     const order = ["members", "roles", "limits", "invites", "channel-notify", "tickets", "incident", "audit"];
     const byKey = new Map(routes.map((route) => [route.key, route] as const));
     return order.map((key) => byKey.get(key)).filter((route): route is AdminRouteDefinition => Boolean(route));
-  }, [runtime.chatId, runtime.isDeveloper, runtime.isAdmin, runtime.isModerator]);
+  }, [runtime.chatId, runtime.isDeveloper, runtime.hasAnyPermission]);
 
   async function handleToggleMaintenanceMode(): Promise<void> {
     if (!canManageMaintenance) {
@@ -4083,7 +4174,10 @@ export function AdminHubSection() {
   }
 
   return (
-    <PermissionGate allowed={runtime.isModerator} hint="Moderator permissions are required for admin sections.">
+    <PermissionGate
+      allowed={quickRoutes.length > 0 || canManageMaintenance}
+      hint="You do not have permissions for admin hub actions."
+    >
       <StateBlock state={updating ? "updating" : "ready"}>
         <AdminPageScaffold title="Admin Hub" subtitle="KPI and quick actions only. Open dedicated pages for detailed workflows.">
           <AdminNavChips />
@@ -4470,7 +4564,10 @@ export function RolesAdminSection() {
   }
 
   return (
-    <PermissionGate allowed={runtime.isAdmin} hint="Admin permissions are required for this section.">
+    <PermissionGate
+      allowed={runtime.hasAnyPermission(ADMIN_ROUTE_PERMISSION_BY_KEY.roles ?? [])}
+      hint="Role and permission management rights are required for this section."
+    >
       <StateBlock state={updating ? "updating" : "ready"}>
         <AdminPageScaffold title="Roles and Permissions" subtitle="Connected to /roles and permission simulation.">
           <AdminNavChips />
@@ -4772,7 +4869,10 @@ export function LimitsAdminSection() {
   }
 
   return (
-    <PermissionGate allowed={runtime.isAdmin} hint="Admin permissions are required for this section.">
+    <PermissionGate
+      allowed={runtime.hasAnyPermission(ADMIN_ROUTE_PERMISSION_BY_KEY.limits ?? [])}
+      hint="Limits management permissions are required for this section."
+    >
       <StateBlock state={updating ? "updating" : "ready"}>
         <AdminPageScaffold title="Limits and Timers" subtitle="Connected to /limits and /limits/roles/:roleId.">
           <AdminNavChips />
@@ -5033,7 +5133,10 @@ export function MembersAdminSection() {
   }
 
   return (
-    <PermissionGate allowed={runtime.isModerator} hint="Moderator permissions are required for this section.">
+    <PermissionGate
+      allowed={runtime.hasAnyPermission(ADMIN_ROUTE_PERMISSION_BY_KEY.members ?? [])}
+      hint="Member moderation permissions are required for this section."
+    >
       <StateBlock state={updating ? "updating" : "ready"}>
         <AdminPageScaffold title="Members and Moderation" subtitle="Connected to /members and moderation actions.">
           <AdminNavChips />
@@ -5617,7 +5720,10 @@ export function InvitesAdminSection() {
   }
 
   return (
-    <PermissionGate allowed={runtime.isAdmin} hint="Admin permissions are required for this section.">
+    <PermissionGate
+      allowed={runtime.hasAnyPermission(ADMIN_ROUTE_PERMISSION_BY_KEY.invites ?? [])}
+      hint="Invite and join policy permissions are required for this section."
+    >
       <StateBlock state={updating ? "updating" : "ready"}>
         <AdminPageScaffold title="Invites and Join Policy" subtitle="Connected to /invites, /join-requests, /join-policy.">
           <AdminNavChips />
@@ -5978,7 +6084,10 @@ export function BroadcastsAdminSection() {
   }
 
   return (
-    <PermissionGate allowed={runtime.isAdmin} hint="Admin permissions are required for this section.">
+    <PermissionGate
+      allowed={runtime.hasAnyPermission(ADMIN_ROUTE_PERMISSION_BY_KEY.broadcasts ?? [])}
+      hint="Broadcast management permissions are required for this section."
+    >
       <StateBlock state={updating ? "updating" : "ready"}>
         <AdminPageScaffold title="Broadcast Campaigns" subtitle="Connected to /broadcasts and campaign state controls.">
           <AdminNavChips />
@@ -6282,7 +6391,10 @@ export function WebhooksAdminSection() {
   }
 
   return (
-    <PermissionGate allowed={runtime.isAdmin} hint="Admin permissions are required for this section.">
+    <PermissionGate
+      allowed={runtime.hasAnyPermission(ADMIN_ROUTE_PERMISSION_BY_KEY.webhooks ?? [])}
+      hint="Webhook management permissions are required for this section."
+    >
       <StateBlock state={updating ? "updating" : "ready"}>
         <AdminPageScaffold title="Webhook Manager" subtitle="Connected to /webhooks and secret rotation actions.">
           <AdminNavChips />
@@ -6500,7 +6612,10 @@ export function AutomationAdminSection() {
   }
 
   return (
-    <PermissionGate allowed={runtime.isAdmin} hint="Admin permissions are required for this section.">
+    <PermissionGate
+      allowed={runtime.hasAnyPermission(ADMIN_ROUTE_PERMISSION_BY_KEY.automation ?? [])}
+      hint="Automation permissions are required for this section."
+    >
       <StateBlock state={updating ? "updating" : "ready"}>
         <AdminPageScaffold
           title="Automation Rules"
@@ -6778,7 +6893,10 @@ export function TicketsAdminSection() {
   }
 
   return (
-    <PermissionGate allowed={runtime.isModerator} hint="Moderator permissions are required for this section.">
+    <PermissionGate
+      allowed={runtime.hasAnyPermission(ADMIN_ROUTE_PERMISSION_BY_KEY.tickets ?? [])}
+      hint="Ticket permissions are required for this section."
+    >
       <StateBlock state={updating ? "updating" : "ready"}>
         <AdminPageScaffold title="Tickets and SLA" subtitle="Connected to /tickets and /tickets/sla/stats.">
           <AdminNavChips />
@@ -7000,7 +7118,10 @@ export function IncidentAdminSection() {
   }
 
   return (
-    <PermissionGate allowed={runtime.isAdmin} hint="Admin permissions are required for this section.">
+    <PermissionGate
+      allowed={runtime.hasAnyPermission(ADMIN_ROUTE_PERMISSION_BY_KEY.incident ?? [])}
+      hint="Incident mode permissions are required for this section."
+    >
       <StateBlock state={updating ? "updating" : "ready"}>
         <AdminPageScaffold title="Incident Mode" subtitle="Connected to /incident-mode/enable and /incident-mode/disable.">
           <AdminNavChips />
@@ -7114,7 +7235,10 @@ export function AuditAdminSection() {
   const previewText = preview.length > previewMax ? `${preview.slice(0, previewMax)}\n...truncated...` : preview;
 
   return (
-    <PermissionGate allowed={runtime.isAdmin} hint="Admin permissions are required for this section.">
+    <PermissionGate
+      allowed={runtime.hasAnyPermission(ADMIN_ROUTE_PERMISSION_BY_KEY.audit ?? [])}
+      hint="Audit permissions are required for this section."
+    >
       <StateBlock state={updating ? "updating" : "ready"}>
         <AdminPageScaffold title="Audit Export" subtitle="Connected to /export/history for trace and audit workflows.">
           <AdminNavChips />
@@ -7191,14 +7315,26 @@ type AdminSectionProps = {
   cards: Array<{ title: string; text: string }>;
   requiresModerator?: boolean;
   requiresAdmin?: boolean;
+  requiredPermissions?: string[];
 };
 
-export function AdminSection({ title, subtitle, cards, requiresModerator, requiresAdmin }: AdminSectionProps) {
+export function AdminSection({
+  title,
+  subtitle,
+  cards,
+  requiresModerator,
+  requiresAdmin,
+  requiredPermissions
+}: AdminSectionProps) {
   const runtime = useChatRuntime();
-  const allowed = requiresAdmin ? runtime.isAdmin : requiresModerator ? runtime.isModerator : true;
-  const hint = requiresAdmin
-    ? "Admin permissions are required for this section."
-    : "Moderator permissions are required for this section.";
+  const fallbackPermissions = requiresAdmin
+    ? ["role.create", "role.update", "permission.grant", "permission.revoke"]
+    : requiresModerator
+      ? ["member.view_list", "member.mute", "member.ban"]
+      : [];
+  const effectivePermissions = requiredPermissions && requiredPermissions.length > 0 ? requiredPermissions : fallbackPermissions;
+  const allowed = effectivePermissions.length === 0 ? true : runtime.hasAnyPermission(effectivePermissions);
+  const hint = "Required permissions are missing for this section.";
 
   return (
     <PermissionGate allowed={allowed} hint={hint}>

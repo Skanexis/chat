@@ -1,5 +1,5 @@
-import { TranslationsSection } from "@/components/chat/route-sections";
+import { notFound } from "next/navigation";
 
 export default function ChatTranslationsPage() {
-  return <TranslationsSection />;
+  notFound();
 }
