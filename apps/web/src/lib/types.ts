@@ -36,6 +36,8 @@ export type ChatMessage = {
   displayAuthorId: string;
   displayAuthorName?: string;
   displayAuthorUsername?: string;
+  authorRoleName?: string;
+  authorRoleBadgeEnabled?: boolean;
   senderMode: "as_user" | "as_group" | "as_role_profile";
   text?: string;
   media?: {
@@ -52,6 +54,7 @@ export type ChatMessage = {
     keyId?: string | null;
     recipientKeyIds?: string[] | null;
   } | null;
+  replyToId?: string | null;
   isDeleted: boolean;
   createdAt: string;
   updatedAt: string;
@@ -231,6 +234,9 @@ export type MembersOverview = {
   members: Array<{
     id: string;
     userId: string;
+    shortUserId?: string;
+    telegramId?: number | null;
+    telegramUsername?: string | null;
     roleId: string;
     roleName: string;
     rolePriority: number;
@@ -239,6 +245,20 @@ export type MembersOverview = {
     bannedUntil: string | null;
     joinedAt: string;
   }>;
+};
+
+export type ModerationHistoryEntry = {
+  id: string;
+  action: "member.ban" | "member.unban";
+  actorId: string;
+  targetId: string;
+  reason: string | null;
+  createdAt: string;
+};
+
+export type ModerationHistoryResponse = {
+  chatId: string;
+  events: ModerationHistoryEntry[];
 };
 
 export type PermissionSimulationResult = {
@@ -494,6 +514,12 @@ export type IncidentModeState = {
 export type IncidentModeResponse = {
   ok: true;
   state: IncidentModeState;
+};
+
+export type IncidentModeStatusResponse = {
+  ok: true;
+  enabled: boolean;
+  state: IncidentModeState | null;
 };
 
 export type ExportHistoryResult = {

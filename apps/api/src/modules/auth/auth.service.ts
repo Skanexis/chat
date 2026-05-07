@@ -80,7 +80,8 @@ export class AuthService {
     });
 
     const targetChatId = dto.chatId ?? "main";
-    await this.db.ensureMember(targetChatId, user.id);
+    const member = await this.db.ensureMember(targetChatId, user.id);
+    await this.assertMaintenanceAccessPolicy(targetChatId, member.roleId);
 
     const requestUser: RequestUser = {
       userId: user.id,
@@ -343,5 +344,23 @@ export class AuthService {
 
     const fallbackSeconds = this.parsePositiveIntEnv("JWT_REFRESH_REPLAY_FALLBACK_TTL_SECONDS", 7 * 24 * 60 * 60);
     return fallbackSeconds;
+  }
+
+  private async assertMaintenanceAccessPolicy(chatId: string, roleId: string): Promise<void> {
+    const active = await this.db.getActiveIncidentMode(chatId);
+    if (!active) {
+      return;
+    }
+
+    const role = await this.db.getRole(chatId, roleId);
+    const normalizedRole = role.name.trim().toLowerCase();
+    const isBypassRole =
+      normalizedRole.includes("owner") ||
+      normalizedRole.includes("creator") ||
+      normalizedRole.includes("administrator") ||
+      normalizedRole.includes("admin");
+    if (!isBypassRole) {
+      throw new ForbiddenException("Maintenance mode is active. Access is temporarily limited to owner/administrator.");
+    }
   }
 }

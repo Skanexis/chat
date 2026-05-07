@@ -1,5 +1,6 @@
 "use client";
 
+import { type CSSProperties, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -10,12 +11,194 @@ type ChatAppShellProps = {
   children: React.ReactNode;
 };
 
+type MaintenanceScene = "diagnostics" | "reindex" | "resync";
+
+const MAINTENANCE_SCENES: MaintenanceScene[] = ["diagnostics", "reindex", "resync"];
+const MAINTENANCE_SCENE_LABELS: Record<MaintenanceScene, string> = {
+  diagnostics: "Node Diagnostics",
+  reindex: "Message Reindex",
+  resync: "Realtime Resync"
+};
+const MAINTENANCE_STEPS = [
+  {
+    title: "Queue freeze",
+    detail: "New message queue paused and isolated."
+  },
+  {
+    title: "History scan",
+    detail: "Message index integrity verification running."
+  },
+  {
+    title: "Socket calibration",
+    detail: "WebSocket channels rebalanced and reattached."
+  },
+  {
+    title: "State warmup",
+    detail: "Cache layers warmed before public reopen."
+  }
+] as const;
+const MAINTENANCE_LOG_LINES = [
+  "scan://threads/main -> checksum stable",
+  "queue://message-dispatch -> paused by maintenance lock",
+  "ws://gateway -> retry topology rebuild",
+  "audit://incident-mode -> protection policy synced",
+  "cache://chat-bootstrap -> hot lanes primed",
+  "role://access-control -> owner/admin bypass active",
+  "notify://broadcast -> deferred until reopen"
+] as const;
+
 function mapStateFromError(code?: number): string {
   if (code === 401) return "Unauthorized";
   if (code === 403) return "Forbidden";
   if (code === 404) return "Not Found";
   if (code === 429) return "Rate Limited";
   return "Runtime Error";
+}
+
+function isMaintenanceLockError(message?: string): boolean {
+  const text = (message ?? "").toLowerCase();
+  return text.includes("maintenance mode");
+}
+
+function MaintenanceLockScreen({
+  reason,
+  onRefresh
+}: {
+  reason: string;
+  onRefresh: () => void;
+}) {
+  const [sceneIndex, setSceneIndex] = useState(0);
+  const [sparkleSeed, setSparkleSeed] = useState(0);
+  const [telemetryTick, setTelemetryTick] = useState(0);
+  const [logIndex, setLogIndex] = useState(0);
+  const [pointer, setPointer] = useState({ x: 50, y: 32 });
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setSceneIndex((prev) => (prev + 1) % MAINTENANCE_SCENES.length);
+    }, 6200);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    const telemetryTimer = window.setInterval(() => {
+      setTelemetryTick((prev) => prev + 1);
+    }, 880);
+    const logTimer = window.setInterval(() => {
+      setLogIndex((prev) => (prev + 1) % MAINTENANCE_LOG_LINES.length);
+    }, 1600);
+    return () => {
+      window.clearInterval(telemetryTimer);
+      window.clearInterval(logTimer);
+    };
+  }, []);
+
+  const scene = MAINTENANCE_SCENES[sceneIndex] ?? "diagnostics";
+  const activeStep = telemetryTick % MAINTENANCE_STEPS.length;
+  const progress = ((telemetryTick * 11) % 94) + 5;
+
+  return (
+    <section
+      className="maintenance-shell"
+      data-scene={scene}
+      style={
+        {
+          "--mx": `${pointer.x}%`,
+          "--my": `${pointer.y}%`,
+          "--spark-seed": sparkleSeed,
+          "--progress": `${progress}%`
+        } as CSSProperties
+      }
+      onPointerMove={(event) => {
+        const rect = event.currentTarget.getBoundingClientRect();
+        const x = ((event.clientX - rect.left) / rect.width) * 100;
+        const y = ((event.clientY - rect.top) / rect.height) * 100;
+        setPointer({
+          x: Math.max(0, Math.min(100, x)),
+          y: Math.max(0, Math.min(100, y))
+        });
+      }}
+      onClick={() => {
+        setSparkleSeed((prev) => prev + 1);
+        setSceneIndex((prev) => (prev + 1) % MAINTENANCE_SCENES.length);
+        setTelemetryTick((prev) => prev + 1);
+      }}
+    >
+      <div className="maintenance-aurora" aria-hidden="true" />
+      <div className="maintenance-grid" aria-hidden="true" />
+      <div className="maintenance-orbit maintenance-orbit-a" aria-hidden="true" />
+      <div className="maintenance-orbit maintenance-orbit-b" aria-hidden="true" />
+      <div className="maintenance-pulse" aria-hidden="true" />
+      <div className="maintenance-noise" aria-hidden="true" />
+      <div className="maintenance-hud" aria-hidden="true">
+        <span>MAINTENANCE</span>
+        <span>{MAINTENANCE_SCENE_LABELS[scene]}</span>
+        <span>phase {activeStep + 1}/4</span>
+      </div>
+      <div className="maintenance-conveyor" aria-hidden="true">
+        <div className="maintenance-track" />
+        <div className="maintenance-track-light" />
+        {Array.from({ length: 8 }).map((_, index) => (
+          <div
+            key={`msg-cap-${index}`}
+            className="maintenance-msg-capsule"
+            style={
+              {
+                "--i": index,
+                "--delay": `${index * 0.42}s`
+              } as CSSProperties
+            }
+          >
+            <span />
+            <span />
+            <span />
+          </div>
+        ))}
+        <div className="maintenance-robot">
+          <div className="maintenance-robot-base" />
+          <div className="maintenance-robot-arm" />
+          <div className="maintenance-robot-joint" />
+          <div className="maintenance-robot-head" />
+          <div className="maintenance-robot-beam" />
+        </div>
+      </div>
+      <div className="maintenance-card">
+        <span className="maintenance-chip">Maintenance Mode</span>
+        <h2>Ristoranti Chat is under technical work</h2>
+        <p>{reason}</p>
+        <div className="maintenance-progress-wrap" aria-hidden="true">
+          <div className="maintenance-progress-bar">
+            <i />
+          </div>
+          <span>{progress}%</span>
+        </div>
+        <div className="maintenance-steps" aria-hidden="true">
+          {MAINTENANCE_STEPS.map((step, index) => (
+            <article
+              key={step.title}
+              className={
+                index === activeStep ? "is-active" : index < activeStep ? "is-done" : undefined
+              }
+            >
+              <strong>{step.title}</strong>
+              <p>{step.detail}</p>
+            </article>
+          ))}
+        </div>
+        <div className="maintenance-log" aria-hidden="true">
+          {MAINTENANCE_LOG_LINES[logIndex]}
+        </div>
+        <div className="maintenance-actions">
+          <button type="button" onClick={onRefresh}>
+            Check again
+          </button>
+          <small>Tap screen to switch repair sequence</small>
+        </div>
+      </div>
+    </section>
+  );
 }
 
 export function ChatAppShell({ children }: ChatAppShellProps) {
@@ -38,11 +221,19 @@ export function ChatAppShell({ children }: ChatAppShellProps) {
     `${rootPath}/translations`,
     `${rootPath}/e2e-devices`
   ]);
-  const mainNavItems = [{ label: "Chat", href: rootPath }];
+  const showMainNav = runtime.isAdmin || runtime.isModerator;
+  const mainNavItems = showMainNav
+    ? runtime.isAdmin
+      ? [
+          { label: "Chat", href: rootPath },
+          { label: "Admin", href: `${rootPath}/admin` }
+        ]
+      : [{ label: "Chat", href: rootPath }]
+    : [];
   const workspaceNavItems: Array<{ label: string; href: string }> = [];
   const adminNavItems: Array<{ label: string; href: string }> = [];
 
-  if (runtime.isModerator) {
+  if (!runtime.isAdmin && runtime.isModerator) {
     workspaceNavItems.push({ label: "Search", href: `${rootPath}/search` });
     workspaceNavItems.push({ label: "Pinned", href: `${rootPath}/pinned` });
     workspaceNavItems.push({ label: "Drafts", href: `${rootPath}/drafts` });
@@ -54,25 +245,11 @@ export function ChatAppShell({ children }: ChatAppShellProps) {
     workspaceNavItems.push({ label: "Reputation", href: `${rootPath}/reputation` });
   }
 
-  if (runtime.isModerator) {
-    adminNavItems.push({ label: "Admin Hub", href: `${rootPath}/admin` });
-    adminNavItems.push({ label: "Members", href: `${rootPath}/admin/members` });
-    adminNavItems.push({ label: "Member Meta", href: `${rootPath}/admin/member-meta` });
-    adminNavItems.push({ label: "Temp Rooms", href: `${rootPath}/admin/temp-rooms` });
-    adminNavItems.push({ label: "Tickets", href: `${rootPath}/admin/tickets` });
+  if (!runtime.isAdmin && runtime.isModerator) {
+    adminNavItems.push({ label: "Moderation", href: `${rootPath}/admin` });
   }
 
-  if (runtime.isAdmin) {
-    adminNavItems.push({ label: "Roles", href: `${rootPath}/admin/roles` });
-    adminNavItems.push({ label: "Limits", href: `${rootPath}/admin/limits` });
-    adminNavItems.push({ label: "Invites", href: `${rootPath}/admin/invites` });
-    adminNavItems.push({ label: "Notify", href: `${rootPath}/admin/channel-notify` });
-    adminNavItems.push({ label: "Broadcasts", href: `${rootPath}/admin/broadcasts` });
-    adminNavItems.push({ label: "Webhooks", href: `${rootPath}/admin/webhooks` });
-    adminNavItems.push({ label: "Automation", href: `${rootPath}/admin/automation` });
-    adminNavItems.push({ label: "Incident", href: `${rootPath}/admin/incident` });
-    adminNavItems.push({ label: "Audit", href: `${rootPath}/admin/audit` });
-  }
+  const showFooterNav = mainNavItems.length > 0 || workspaceNavItems.length > 0 || adminNavItems.length > 0;
 
   if (runtime.state === "initializing") {
     return (
@@ -87,6 +264,9 @@ export function ChatAppShell({ children }: ChatAppShellProps) {
   }
 
   if (runtime.state === "error") {
+    if (isMaintenanceLockError(runtime.error?.message)) {
+      return <MaintenanceLockScreen reason={runtime.error?.message ?? "Maintenance mode is active."} onRefresh={runtime.reload} />;
+    }
     return (
       <section className="app-shell">
         <ErrorSurface
@@ -97,6 +277,15 @@ export function ChatAppShell({ children }: ChatAppShellProps) {
           onAction={runtime.reload}
         />
       </section>
+    );
+  }
+
+  if (runtime.maintenanceEnabled && !runtime.isMaintenanceBypass) {
+    return (
+      <MaintenanceLockScreen
+        reason={runtime.maintenanceReason ?? "Temporary service window. Please try again in a few minutes."}
+        onRefresh={runtime.reload}
+      />
     );
   }
 
@@ -148,42 +337,46 @@ export function ChatAppShell({ children }: ChatAppShellProps) {
         />
       ) : null}
 
-      <footer className="app-footer">
-        <nav className="ds-bottom-tabs" aria-label="Main section">
-          {mainNavItems.map((item) => {
-            const active = normalizedPathname === item.href;
-            return (
-              <Link key={item.href} className={cn("ds-tab-btn", active ? "is-active" : undefined)} href={item.href}>
-                <span>{item.label}</span>
-              </Link>
-            );
-          })}
-        </nav>
-        {workspaceNavItems.length > 0 ? (
-          <nav className="ds-bottom-tabs ds-bottom-tabs-secondary" aria-label="Workspace sections">
-            {workspaceNavItems.map((item) => {
-              const active = normalizedPathname === item.href;
-              return (
-                <Link key={item.href} className={cn("ds-tab-btn", active ? "is-active" : undefined)} href={item.href}>
-                  <span>{item.label}</span>
-                </Link>
-              );
-            })}
-          </nav>
-        ) : null}
-        {adminNavItems.length > 0 ? (
-          <nav className="ds-bottom-tabs ds-bottom-tabs-admin" aria-label="Admin sections">
-            {adminNavItems.map((item) => {
-              const active = normalizedPathname === item.href;
-              return (
-                <Link key={item.href} className={cn("ds-tab-btn", active ? "is-active" : undefined)} href={item.href}>
-                  <span>{item.label}</span>
-                </Link>
-              );
-            })}
-          </nav>
-        ) : null}
-      </footer>
+      {showFooterNav ? (
+        <footer className="app-footer">
+          {mainNavItems.length > 0 ? (
+            <nav className="ds-bottom-tabs" aria-label="Main section">
+              {mainNavItems.map((item) => {
+                const active = normalizedPathname === item.href;
+                return (
+                  <Link key={item.href} className={cn("ds-tab-btn", active ? "is-active" : undefined)} href={item.href}>
+                    <span>{item.label}</span>
+                  </Link>
+                );
+              })}
+            </nav>
+          ) : null}
+          {workspaceNavItems.length > 0 ? (
+            <nav className="ds-bottom-tabs ds-bottom-tabs-secondary" aria-label="Workspace sections">
+              {workspaceNavItems.map((item) => {
+                const active = normalizedPathname === item.href;
+                return (
+                  <Link key={item.href} className={cn("ds-tab-btn", active ? "is-active" : undefined)} href={item.href}>
+                    <span>{item.label}</span>
+                  </Link>
+                );
+              })}
+            </nav>
+          ) : null}
+          {adminNavItems.length > 0 ? (
+            <nav className="ds-bottom-tabs ds-bottom-tabs-admin" aria-label="Admin sections">
+              {adminNavItems.map((item) => {
+                const active = normalizedPathname === item.href;
+                return (
+                  <Link key={item.href} className={cn("ds-tab-btn", active ? "is-active" : undefined)} href={item.href}>
+                    <span>{item.label}</span>
+                  </Link>
+                );
+              })}
+            </nav>
+          ) : null}
+        </footer>
+      ) : null}
     </section>
   );
 }

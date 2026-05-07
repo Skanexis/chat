@@ -30,6 +30,7 @@ import type {
   ListTranslationsResponse,
   MemberProfileField,
   MembersOverview,
+  ModerationHistoryEntry,
   PinnedMessageEntry,
   PermissionSimulationResult,
   Poll,
@@ -70,8 +71,14 @@ type PanelError = {
   statusCode?: number;
 };
 
+const ROLE_BADGE_PERMISSION = "ui.role.badge.show";
+
 function shortId(value: string): string {
   return value.length <= 8 ? value : value.slice(0, 8);
+}
+
+function hasRoleBadgePermission(permissions: string[]): boolean {
+  return permissions.includes("*") || permissions.includes(ROLE_BADGE_PERMISSION);
 }
 
 function resolveAuthorLabel(message: Pick<ChatMessage, "authorId" | "displayAuthorId" | "displayAuthorName" | "displayAuthorUsername">, currentUserId?: string | null): string {
@@ -213,6 +220,10 @@ const ROLE_PERMISSION_GROUPS: Array<{ label: string; permissions: string[] }> = 
       "incident_mode.enable",
       "audit.view"
     ]
+  },
+  {
+    label: "UI",
+    permissions: [ROLE_BADGE_PERMISSION]
   }
 ];
 
@@ -293,6 +304,16 @@ function formatJson(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
+function isMaintenanceBypassRole(roleName: string): boolean {
+  const normalized = roleName.trim().toLowerCase();
+  return (
+    normalized.includes("owner") ||
+    normalized.includes("creator") ||
+    normalized.includes("administrator") ||
+    normalized.includes("admin")
+  );
+}
+
 function useAuthedApi() {
   const runtime = useChatRuntime();
   const api = useMemo(() => new ApiClient(appConfig.apiBaseUrl), []);
@@ -321,6 +342,14 @@ export function ChatMainSection() {
   const feedRef = useRef<HTMLDivElement | null>(null);
   const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null);
   const [isNearBottom, setIsNearBottom] = useState(true);
+  const messageById = useMemo(
+    () => new Map(runtime.messages.map((message) => [message.id, message] as const)),
+    [runtime.messages]
+  );
+  const replyTargetMessage = useMemo(
+    () => runtime.messages.find((message) => message.id === runtime.replyToMessageId) ?? null,
+    [runtime.messages, runtime.replyToMessageId]
+  );
 
   useEffect(() => {
     const feed = feedRef.current;
@@ -367,6 +396,25 @@ export function ChatMainSection() {
                 own: message.authorId === runtime.currentUserId,
                 authorId: message.authorId,
                 authorName: resolveAuthorLabel(message, runtime.currentUserId),
+                roleBadgeText:
+                  message.displayAuthorType === "user" && message.authorRoleBadgeEnabled && message.authorRoleName
+                    ? message.authorRoleName
+                    : undefined,
+                replyTo: message.replyToId
+                  ? (() => {
+                      const target = messageById.get(message.replyToId);
+                      if (!target) {
+                        return {
+                          author: "Message",
+                          text: "Original message"
+                        };
+                      }
+                      return {
+                        author: resolveAuthorLabel(target, runtime.currentUserId),
+                        text: getMessagePreview(target)
+                      };
+                    })()
+                  : null,
                 text: getMessagePreview(message),
                 createdAtLabel: new Date(message.createdAt).toLocaleTimeString([], {
                   hour: "2-digit",
@@ -385,6 +433,10 @@ export function ChatMainSection() {
                 setSelectedMessageId((prev) => (prev === message.id ? null : message.id));
               }}
               onOpenActions={() => {
+                setSelectedMessageId(message.id);
+              }}
+              onReply={() => {
+                runtime.setReplyToMessageId(message.id);
                 setSelectedMessageId(message.id);
               }}
               onAddReaction={(reaction) => runtime.onAddReaction(message.id, reaction)}
@@ -419,6 +471,15 @@ export function ChatMainSection() {
         draft={runtime.draft}
         sending={runtime.sending}
         disabled={!runtime.canSend}
+        replyPreview={
+          replyTargetMessage
+            ? {
+                author: resolveAuthorLabel(replyTargetMessage, runtime.currentUserId),
+                text: getMessagePreview(replyTargetMessage)
+              }
+            : null
+        }
+        onCancelReply={runtime.clearReplyToMessage}
         senderMode={runtime.senderMode}
         senderOptions={runtime.senderOptions}
         onSenderModeChange={runtime.setSenderMode}
@@ -3345,126 +3406,901 @@ function AdminNavChips() {
 export function AdminHubSection() {
   const runtime = useChatRuntime();
   const api = useAuthedApi();
-  const base = `/chat/${encodeURIComponent(runtime.chatId)}/admin`;
-  const [stats, setStats] = useState<{
-    members: number;
-    banned: number;
-    muted: number;
-    roles: number;
-    joinRequests: number;
+  const [roles, setRoles] = useState<ChatRole[]>([]);
+  const [members, setMembers] = useState<MembersOverview["members"]>([]);
+  const [pendingJoinRequests, setPendingJoinRequests] = useState(0);
+  const [activeTab, setActiveTab] = useState<"overview" | "members" | "roles">("overview");
+  const [state, setState] = useState<GlobalUiState>("loading");
+  const [updating, setUpdating] = useState(false);
+  const [error, setError] = useState<PanelError | null>(null);
+  const [memberStatusFilter, setMemberStatusFilter] = useState<"all" | "active" | "readonly" | "muted" | "banned">("all");
+  const [memberSearch, setMemberSearch] = useState("");
+  const [historyTargetSearch, setHistoryTargetSearch] = useState("");
+  const [moderationHistory, setModerationHistory] = useState<ModerationHistoryEntry[]>([]);
+  const [memberActionReason, setMemberActionReason] = useState("manual moderation");
+  const [pendingDangerAction, setPendingDangerAction] = useState<{
+    action: "ban" | "unban" | "kick";
+    userId: string;
+    shortUserId: string;
+    telegramUsername: string | null;
+    telegramId: number | null;
   } | null>(null);
-  const [statsError, setStatsError] = useState<string | null>(null);
-  const moderatorLinks = [
-    { href: `${base}/members`, label: "Members" },
-    { href: `${base}/member-meta`, label: "Member Meta" },
-    { href: `${base}/temp-rooms`, label: "Temp Rooms" },
-    { href: `${base}/tickets`, label: "Tickets" }
-  ];
-  const adminLinks = [
-    { href: `${base}/roles`, label: "Roles" },
-    { href: `${base}/limits`, label: "Limits" },
-    { href: `${base}/invites`, label: "Invites" },
-    { href: `${base}/channel-notify`, label: "Notify" },
-    { href: `${base}/broadcasts`, label: "Broadcasts" },
-    { href: `${base}/webhooks`, label: "Webhooks" },
-    { href: `${base}/automation`, label: "Automation" },
-    { href: `${base}/incident`, label: "Incident" },
-    { href: `${base}/audit`, label: "Audit" }
-  ];
+  const [selectedMemberId, setSelectedMemberId] = useState("");
+  const [selectedMemberRoleId, setSelectedMemberRoleId] = useState("");
+  const [selectedRoleId, setSelectedRoleId] = useState("");
+  const [roleNameDraft, setRoleNameDraft] = useState("");
+  const [rolePriorityDraft, setRolePriorityDraft] = useState("50");
+  const [roleDefaultDraft, setRoleDefaultDraft] = useState(false);
+  const [rolePermissionsDraft, setRolePermissionsDraft] = useState<string[]>([]);
+  const [roleWizardStep, setRoleWizardStep] = useState<1 | 2 | 3>(1);
+  const [rolePresetKey, setRolePresetKey] = useState<keyof typeof ROLE_PERMISSION_PRESETS>("member_default");
+  const [newRoleName, setNewRoleName] = useState("");
+  const [newRolePriority, setNewRolePriority] = useState("40");
+  const [maintenanceEnabled, setMaintenanceEnabled] = useState(false);
+  const [maintenanceReasonDraft, setMaintenanceReasonDraft] = useState("Scheduled update in progress.");
+  const [maintenanceAnimating, setMaintenanceAnimating] = useState(false);
+  const canManageMaintenance = useMemo(() => isMaintenanceBypassRole(runtime.roleName), [runtime.roleName]);
+
+  const load = useCallback(async () => {
+    setState("loading");
+    setError(null);
+    try {
+      const [membersResult, rolesResult, requestsResult, moderationHistoryResult, incidentModeResult] = await Promise.all([
+        api.listMembers(runtime.chatId),
+        api.listRoles(runtime.chatId),
+        api.listJoinRequests(runtime.chatId, "pending").catch(() => ({ requests: [] })),
+        api.listModerationHistory(runtime.chatId, { limit: 150 }).catch(() => ({ chatId: runtime.chatId, events: [] })),
+        api.getIncidentModeState(runtime.chatId).catch(() => ({ ok: true as const, enabled: false, state: null }))
+      ]);
+      setMembers(membersResult.members);
+      setRoles(rolesResult.sort((a, b) => b.priority - a.priority));
+      setPendingJoinRequests(requestsResult.requests.length);
+      setModerationHistory(moderationHistoryResult.events);
+      setMaintenanceEnabled(incidentModeResult.enabled);
+      if (incidentModeResult.state?.reason) {
+        setMaintenanceReasonDraft(incidentModeResult.state.reason);
+      }
+      setState("ready");
+    } catch (loadError) {
+      const parsed = parseError(loadError);
+      setError(parsed);
+      setState(getPanelState(parsed.statusCode));
+    }
+  }, [api, runtime.chatId]);
 
   useEffect(() => {
-    let alive = true;
-    async function loadStats(): Promise<void> {
-      setStatsError(null);
-      try {
-        const [members, roles, requests] = await Promise.all([
-          api.listMembers(runtime.chatId),
-          api.listRoles(runtime.chatId).catch(() => []),
-          api.listJoinRequests(runtime.chatId, "pending").catch(() => ({ requests: [] }))
-        ]);
-        if (!alive) {
-          return;
-        }
-        const banned = members.members.filter((entry) => entry.status === "banned").length;
-        const muted = members.members.filter((entry) => entry.status === "muted").length;
-        setStats({
-          members: members.members.length,
-          banned,
-          muted,
-          roles: roles.length,
-          joinRequests: requests.requests.length
-        });
-      } catch (error) {
-        if (!alive) {
-          return;
-        }
-        setStatsError(parseError(error).message);
-      }
+    void load();
+  }, [load]);
+
+  useEffect(() => {
+    if (roles.length === 0) {
+      setSelectedRoleId("");
+      setRolePermissionsDraft([]);
+      return;
     }
 
-    void loadStats();
-    return () => {
-      alive = false;
-    };
-  }, [api, runtime.chatId]);
+    const role = roles.find((entry) => entry.id === selectedRoleId) ?? roles[0];
+    if (!role) {
+      return;
+    }
+    setSelectedRoleId(role.id);
+    setRoleNameDraft(role.name);
+    setRolePriorityDraft(String(role.priority));
+    setRoleDefaultDraft(role.isDefault);
+    setRolePermissionsDraft(role.permissions);
+    setRoleWizardStep(1);
+    setRolePresetKey("member_default");
+  }, [roles, selectedRoleId]);
+
+  useEffect(() => {
+    if (members.length === 0) {
+      setSelectedMemberId("");
+      setSelectedMemberRoleId("");
+      return;
+    }
+    if (!selectedMemberId || !members.some((member) => member.userId === selectedMemberId)) {
+      setSelectedMemberId(members[0]!.userId);
+      setSelectedMemberRoleId(members[0]!.roleId);
+      return;
+    }
+    const selectedMember = members.find((member) => member.userId === selectedMemberId);
+    if (selectedMember && selectedMemberRoleId !== selectedMember.roleId) {
+      setSelectedMemberRoleId(selectedMember.roleId);
+    }
+  }, [members, selectedMemberId, selectedMemberRoleId]);
+
+  const statusCounts = useMemo(
+    () =>
+      members.reduce(
+        (acc, member) => {
+          acc[member.status] += 1;
+          return acc;
+        },
+        { active: 0, readonly: 0, muted: 0, banned: 0 }
+      ),
+    [members]
+  );
+  const defaultRole = useMemo(() => roles.find((role) => role.isDefault) ?? null, [roles]);
+  const topRoles = useMemo(() => roles.slice(0, 6), [roles]);
+  const selectedMember = useMemo(
+    () => members.find((member) => member.userId === selectedMemberId) ?? null,
+    [members, selectedMemberId]
+  );
+  const bannedMembers = useMemo(() => members.filter((member) => member.status === "banned"), [members]);
+
+  const filteredMembers = useMemo(() => {
+    const normalizedQuery = memberSearch.trim().toLowerCase();
+    return members.filter((member) => {
+      if (memberStatusFilter !== "all" && member.status !== memberStatusFilter) {
+        return false;
+      }
+      if (!normalizedQuery) {
+        return true;
+      }
+      const shortMemberId = (member.shortUserId ?? shortId(member.userId)).toLowerCase();
+      const telegramUsername = (member.telegramUsername ?? "").toLowerCase();
+      const telegramId = member.telegramId === null || member.telegramId === undefined ? "" : String(member.telegramId);
+      return (
+        member.userId.toLowerCase().includes(normalizedQuery) ||
+        shortMemberId.includes(normalizedQuery) ||
+        member.roleName.toLowerCase().includes(normalizedQuery) ||
+        telegramUsername.includes(normalizedQuery) ||
+        telegramId.includes(normalizedQuery)
+      );
+    });
+  }, [memberSearch, memberStatusFilter, members]);
+  const filteredModerationHistory = useMemo(() => {
+    const normalized = historyTargetSearch.trim().toLowerCase();
+    if (!normalized) {
+      return moderationHistory;
+    }
+    return moderationHistory.filter(
+      (entry) =>
+        entry.targetId.toLowerCase().includes(normalized) ||
+        entry.actorId.toLowerCase().includes(normalized) ||
+        (entry.reason ?? "").toLowerCase().includes(normalized)
+    );
+  }, [historyTargetSearch, moderationHistory]);
+
+  async function withMemberAction(
+    userId: string,
+    action: (reason?: string) => Promise<unknown>,
+    defaultReason: string
+  ): Promise<void> {
+    const reason = memberActionReason.trim() || defaultReason;
+    setUpdating(true);
+    setError(null);
+    try {
+      await action(reason);
+      await load();
+    } catch (actionError) {
+      setError(parseError(actionError));
+    } finally {
+      setUpdating(false);
+    }
+  }
+
+  async function handleAssignRoleToMember(): Promise<void> {
+    if (!selectedMemberId || !selectedMemberRoleId) {
+      setError({ message: "Select member and role first." });
+      return;
+    }
+    setUpdating(true);
+    setError(null);
+    try {
+      await api.assignRole(runtime.chatId, selectedMemberRoleId, selectedMemberId);
+      await load();
+    } catch (assignError) {
+      setError(parseError(assignError));
+    } finally {
+      setUpdating(false);
+    }
+  }
+
+  async function handleLoadModerationHistory(): Promise<void> {
+    setUpdating(true);
+    setError(null);
+    try {
+      const response = await api.listModerationHistory(runtime.chatId, {
+        target_user_id: historyTargetSearch.trim() || undefined,
+        limit: 150
+      });
+      setModerationHistory(response.events);
+    } catch (historyError) {
+      setError(parseError(historyError));
+    } finally {
+      setUpdating(false);
+    }
+  }
+
+  function getMemberIdentityLabel(member: MembersOverview["members"][number]): string {
+    const shortMemberId = member.shortUserId ?? shortId(member.userId);
+    const usernameLabel = member.telegramUsername ? `@${member.telegramUsername}` : "no_username";
+    const telegramIdLabel = member.telegramId ?? "no_tg_id";
+    return `${shortMemberId} | ${usernameLabel} | tg:${telegramIdLabel}`;
+  }
+
+  function openDangerAction(action: "ban" | "unban" | "kick", member: MembersOverview["members"][number]): void {
+    setPendingDangerAction({
+      action,
+      userId: member.userId,
+      shortUserId: member.shortUserId ?? shortId(member.userId),
+      telegramUsername: member.telegramUsername ?? null,
+      telegramId: member.telegramId ?? null
+    });
+  }
+
+  async function confirmDangerAction(): Promise<void> {
+    if (!pendingDangerAction) {
+      return;
+    }
+    const selected = pendingDangerAction;
+    setPendingDangerAction(null);
+    if (selected.action === "ban") {
+      await withMemberAction(selected.userId, (reason) => api.banMember(runtime.chatId, selected.userId, reason), "ban");
+      return;
+    }
+    if (selected.action === "unban") {
+      await withMemberAction(selected.userId, (reason) => api.unbanMember(runtime.chatId, selected.userId, reason), "unban");
+      return;
+    }
+    await withMemberAction(selected.userId, (reason) => api.kickMember(runtime.chatId, selected.userId, reason), "kick");
+  }
+
+  async function handleToggleMaintenanceMode(): Promise<void> {
+    if (!canManageMaintenance) {
+      setError({ message: "Only owner/administrator can change maintenance mode." });
+      return;
+    }
+    const reason = maintenanceReasonDraft.trim() || "Scheduled update in progress.";
+    setUpdating(true);
+    setError(null);
+    try {
+      if (maintenanceEnabled) {
+        await api.disableIncidentMode(runtime.chatId, reason);
+      } else {
+        await api.enableIncidentMode(runtime.chatId, {
+          reason,
+          policy_snapshot_json: {
+            maintenance: true,
+            lock_scope: "non_owner_non_admin",
+            ui: "animated_lock_v1"
+          }
+        });
+      }
+      setMaintenanceAnimating(true);
+      window.setTimeout(() => setMaintenanceAnimating(false), 520);
+      await load();
+    } catch (maintenanceError) {
+      setError(parseError(maintenanceError));
+      setMaintenanceAnimating(false);
+    } finally {
+      setUpdating(false);
+    }
+  }
+
+  function toggleRolePermission(permission: string): void {
+    setRolePermissionsDraft((prev) =>
+      prev.includes(permission) ? prev.filter((entry) => entry !== permission) : [...prev, permission]
+    );
+  }
+
+  function applyRolePreset(presetKey: keyof typeof ROLE_PERMISSION_PRESETS): void {
+    const preset = ROLE_PERMISSION_PRESETS[presetKey];
+    setRolePresetKey(presetKey);
+    setRolePermissionsDraft(Array.from(new Set(preset)));
+  }
+
+  function setRoleBadgeEnabled(enabled: boolean): void {
+    setRolePermissionsDraft((prev) => {
+      if (prev.includes("*")) {
+        return prev;
+      }
+      const hasPermission = prev.includes(ROLE_BADGE_PERMISSION);
+      if (enabled && !hasPermission) {
+        return [...prev, ROLE_BADGE_PERMISSION];
+      }
+      if (!enabled && hasPermission) {
+        return prev.filter((entry) => entry !== ROLE_BADGE_PERMISSION);
+      }
+      return prev;
+    });
+  }
+
+  async function handleSaveRole(): Promise<void> {
+    if (!selectedRoleId) {
+      return;
+    }
+    const nextPriority = Number(rolePriorityDraft);
+    if (!Number.isFinite(nextPriority)) {
+      setError({ message: "Role priority must be a valid number." });
+      return;
+    }
+    if (rolePermissionsDraft.length === 0) {
+      setError({ message: "Role needs at least one permission." });
+      return;
+    }
+
+    setUpdating(true);
+    setError(null);
+    try {
+      await api.updateRole(runtime.chatId, selectedRoleId, {
+        name: roleNameDraft.trim() || "role",
+        priority: Math.floor(nextPriority),
+        permissions: rolePermissionsDraft,
+        isDefault: roleDefaultDraft
+      });
+      await load();
+    } catch (saveError) {
+      setError(parseError(saveError));
+    } finally {
+      setUpdating(false);
+    }
+  }
+
+  async function handleCreateRole(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    const name = newRoleName.trim();
+    const priority = Number(newRolePriority);
+    if (!name || !Number.isFinite(priority)) {
+      return;
+    }
+    setUpdating(true);
+    setError(null);
+    try {
+      await api.createRole(runtime.chatId, {
+        name,
+        priority: Math.floor(priority),
+        permissions: ROLE_PERMISSION_PRESETS.member_default
+      });
+      setNewRoleName("");
+      await load();
+    } catch (createError) {
+      setError(parseError(createError));
+    } finally {
+      setUpdating(false);
+    }
+  }
+
+  if (state !== "ready" && state !== "updating") {
+    return (
+      <Card className="app-tab-card">
+        {error ? <PanelErrorState error={error} onRetry={() => void load()} /> : <StateBlock state={state} />}
+      </Card>
+    );
+  }
 
   return (
     <PermissionGate allowed={runtime.isModerator} hint="Moderator permissions are required for admin sections.">
-      <Card className="app-tab-card">
-        <SectionTitle
-          title="Admin Hub"
-          subtitle="Quick access to moderation and administration sections."
-        />
-        {stats ? (
+      <StateBlock state={updating ? "updating" : "ready"}>
+        <AdminPageScaffold title="Admin Control Center" subtitle="Simple all-in-one panel for owner/admin operations.">
           <div className="admin-stats-grid">
             <article className="admin-stat-card">
-              <strong>{stats.members}</strong>
+              <strong>{members.length}</strong>
               <span>Members</span>
             </article>
             <article className="admin-stat-card">
-              <strong>{stats.muted}</strong>
+              <strong>{statusCounts.muted}</strong>
               <span>Muted</span>
             </article>
             <article className="admin-stat-card">
-              <strong>{stats.banned}</strong>
+              <strong>{statusCounts.banned}</strong>
               <span>Banned</span>
             </article>
             <article className="admin-stat-card">
-              <strong>{stats.roles}</strong>
+              <strong>{roles.length}</strong>
               <span>Roles</span>
             </article>
             <article className="admin-stat-card">
-              <strong>{stats.joinRequests}</strong>
+              <strong>{pendingJoinRequests}</strong>
               <span>Pending Joins</span>
             </article>
           </div>
-        ) : null}
-        {statsError ? <RestrictionHint message={statsError} variant="warning" /> : null}
-        <div className="panel-subcard">
-          <SectionTitle title="Moderation" />
-          <div className="panel-chip-list">
-            {moderatorLinks.map((link) => (
-              <div key={link.href} className="panel-chip">
-                <Link href={link.href}>{link.label}</Link>
+          <div className="admin-control-tabs" role="tablist" aria-label="Admin control sections">
+            {[
+              { key: "overview", label: "Overview" },
+              { key: "members", label: "Members" },
+              { key: "roles", label: "Roles" }
+            ].map((tab) => (
+              <div key={tab.key} className="panel-chip">
+                <button
+                  type="button"
+                  className={activeTab === tab.key ? "active" : undefined}
+                  onClick={() => setActiveTab(tab.key as "overview" | "members" | "roles")}
+                  aria-pressed={activeTab === tab.key}
+                >
+                  {tab.label}
+                </button>
               </div>
             ))}
           </div>
-        </div>
-        <div className="panel-subcard">
-          <SectionTitle title="Administration" subtitle={runtime.isAdmin ? "Full access available." : "Admin role required."} />
-          {runtime.isAdmin ? (
-            <div className="panel-chip-list">
-              {adminLinks.map((link) => (
-                <div key={link.href} className="panel-chip">
-                  <Link href={link.href}>{link.label}</Link>
+
+          {error ? <RestrictionHint message={error.message} variant="danger" /> : null}
+
+          {activeTab === "overview" ? (
+            <section className="panel-subcard">
+              <SectionTitle title="Workspace Overview" subtitle="Single-screen health and role snapshot." />
+              <section
+                className={`maintenance-admin-card ${maintenanceEnabled ? "is-on" : "is-off"}${maintenanceAnimating ? " is-animating" : ""}`}
+              >
+                <div className="maintenance-admin-head">
+                  <div>
+                    <strong>Maintenance mode</strong>
+                    <p>
+                      Locks the app for everyone except <code>owner</code> and <code>administrator</code>.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className={`maintenance-admin-toggle${maintenanceEnabled ? " is-on" : ""}`}
+                    onClick={() => void handleToggleMaintenanceMode()}
+                    disabled={!canManageMaintenance || updating}
+                    aria-pressed={maintenanceEnabled}
+                  >
+                    <span>{maintenanceEnabled ? "ON" : "OFF"}</span>
+                  </button>
                 </div>
-              ))}
+                <label className="maintenance-admin-reason">
+                  Reason shown on lock screen
+                  <input
+                    value={maintenanceReasonDraft}
+                    onChange={(event) => setMaintenanceReasonDraft(event.target.value)}
+                    placeholder="Scheduled update in progress."
+                    disabled={!canManageMaintenance}
+                  />
+                </label>
+                {!canManageMaintenance ? (
+                  <RestrictionHint
+                    message="Only owner/administrator role can switch maintenance mode."
+                    variant="warning"
+                  />
+                ) : null}
+              </section>
+              <div className="panel-list">
+                <article className="panel-item">
+                  <header>
+                    <strong>Membership health</strong>
+                    <time>live</time>
+                  </header>
+                  <p>
+                    active: {statusCounts.active} | readonly: {statusCounts.readonly} | muted: {statusCounts.muted} | banned: {statusCounts.banned}
+                  </p>
+                </article>
+                <article className="panel-item">
+                  <header>
+                    <strong>Default role</strong>
+                    <time>{defaultRole ? `p${defaultRole.priority}` : "not set"}</time>
+                  </header>
+                  <p>{defaultRole ? `${defaultRole.name} (${defaultRole.permissions.length} permissions)` : "No default role configured."}</p>
+                </article>
+                <article className="panel-item">
+                  <header>
+                    <strong>Top roles by priority</strong>
+                    <time>{roles.length} total</time>
+                  </header>
+                  <p>{topRoles.map((role) => `${role.name}(p${role.priority})`).join(", ") || "No roles yet."}</p>
+                </article>
+              </div>
+            </section>
+          ) : null}
+
+          {activeTab === "members" ? (
+            <section className="panel-subcard">
+              <SectionTitle title="Members and Moderation" subtitle="Find user, assign role, mute/ban quickly." />
+              <div className="panel-toolbar">
+                <label>
+                  Status
+                  <select
+                    value={memberStatusFilter}
+                    onChange={(event) =>
+                      setMemberStatusFilter(event.target.value as "all" | "active" | "readonly" | "muted" | "banned")
+                    }
+                  >
+                    <option value="all">all</option>
+                    <option value="active">active</option>
+                    <option value="readonly">readonly</option>
+                    <option value="muted">muted</option>
+                    <option value="banned">banned</option>
+                  </select>
+                </label>
+                <label>
+                  Search
+                  <input
+                    value={memberSearch}
+                    onChange={(event) => setMemberSearch(event.target.value)}
+                    placeholder="user id / short id / @username / tg id / role..."
+                  />
+                </label>
+                <Button variant="secondary" onClick={() => void load()}>
+                  Refresh
+                </Button>
+              </div>
+              <div className="panel-inline-form">
+                <select value={selectedMemberId} onChange={(event) => setSelectedMemberId(event.target.value)}>
+                  <option value="">Select member...</option>
+                  {members.map((member) => (
+                    <option key={member.id} value={member.userId}>
+                      {getMemberIdentityLabel(member)} ({member.roleName})
+                    </option>
+                  ))}
+                </select>
+                <select value={selectedMemberRoleId} onChange={(event) => setSelectedMemberRoleId(event.target.value)}>
+                  <option value="">Select role...</option>
+                  {roles.map((role) => (
+                    <option key={role.id} value={role.id}>
+                      {role.name} (p{role.priority})
+                    </option>
+                  ))}
+                </select>
+                <Button variant="secondary" onClick={() => void handleAssignRoleToMember()}>
+                  Assign role
+                </Button>
+              </div>
+              <div className="panel-inline-form">
+                <label>
+                  Action reason
+                  <input
+                    value={memberActionReason}
+                    onChange={(event) => setMemberActionReason(event.target.value)}
+                    placeholder="reason for audit log"
+                  />
+                </label>
+                <div />
+                <div />
+              </div>
+              {selectedMember ? (
+                <p className="panel-summary">
+                  Selected: {getMemberIdentityLabel(selectedMember)} | current role: {selectedMember.roleName} | status: {selectedMember.status}
+                </p>
+              ) : null}
+              {filteredMembers.length === 0 ? (
+                <StateBlock state="empty" title="No members found" description="Try another filter or search value." />
+              ) : (
+                <div className="panel-list">
+                  {filteredMembers.slice(0, 60).map((member) => (
+                    <article key={member.id} className="panel-item">
+                      <header>
+                        <strong>{getMemberIdentityLabel(member)}</strong>
+                        <time>{member.status}</time>
+                      </header>
+                      <p>
+                        user id: {member.userId} | role: {member.roleName} (p{member.rolePriority}) | joined: {formatDateTime(member.joinedAt)}
+                        {member.mutedUntil ? ` | muted until ${formatDateTime(member.mutedUntil)}` : ""}
+                      </p>
+                      <div className="panel-actions">
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() =>
+                            void withMemberAction(
+                              member.userId,
+                              (reason) => api.muteMember(runtime.chatId, member.userId, reason),
+                              "manual mute"
+                            )
+                          }
+                        >
+                          Mute
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() =>
+                            void withMemberAction(
+                              member.userId,
+                              (reason) => api.unmuteMember(runtime.chatId, member.userId, reason),
+                              "manual unmute"
+                            )
+                          }
+                        >
+                          Unmute
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="danger"
+                          onClick={() => openDangerAction("ban", member)}
+                        >
+                          Ban
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => openDangerAction("unban", member)}
+                        >
+                          Unban
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="danger"
+                          onClick={() => openDangerAction("kick", member)}
+                        >
+                          Kick
+                        </Button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+
+              <section className="panel-subcard admin-inline-subcard">
+                <SectionTitle title="Ban / Unban Center" subtitle="Focused controls for blocked profiles and moderation history." />
+                <div className="panel-inline-form">
+                  <label>
+                    History search
+                    <input
+                      value={historyTargetSearch}
+                      onChange={(event) => setHistoryTargetSearch(event.target.value)}
+                      placeholder="target id / actor / reason"
+                    />
+                  </label>
+                  <Button variant="secondary" onClick={() => void handleLoadModerationHistory()}>
+                    Refresh history
+                  </Button>
+                </div>
+
+                {bannedMembers.length === 0 ? (
+                  <StateBlock state="empty" title="No banned members now" description="Active bans will be listed here." />
+                ) : (
+                  <div className="panel-list">
+                    {bannedMembers.map((member) => (
+                      <article key={member.id} className="panel-item">
+                        <header>
+                          <strong>{getMemberIdentityLabel(member)}</strong>
+                          <time>banned</time>
+                        </header>
+                        <p>
+                          user id: {member.userId} | role: {member.roleName} | joined: {formatDateTime(member.joinedAt)}
+                        </p>
+                        <div className="panel-actions">
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => openDangerAction("unban", member)}
+                          >
+                            Unban now
+                          </Button>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                )}
+
+                {filteredModerationHistory.length === 0 ? (
+                  <StateBlock state="empty" title="No ban/unban history found" description="Try another search or refresh history." />
+                ) : (
+                  <div className="panel-list">
+                    {filteredModerationHistory.slice(0, 80).map((entry) => (
+                      <article key={entry.id} className="panel-item">
+                        <header>
+                          <strong>{entry.targetId}</strong>
+                          <time>{entry.action === "member.ban" ? "ban" : "unban"}</time>
+                        </header>
+                        <p>
+                          by: {entry.actorId} | at: {formatDateTime(entry.createdAt)} | reason: {entry.reason ?? "-"}
+                        </p>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </section>
+            </section>
+          ) : null}
+
+          {activeTab === "roles" ? (
+            <section className="panel-subcard">
+              <SectionTitle title="Roles and Permissions" subtitle="Wizard setup: preset, details, final permissions." />
+              <div className="panel-list">
+                {roles.map((role) => (
+                  <article key={role.id} className="panel-item">
+                    <header>
+                      <strong>{role.name}</strong>
+                      <time>
+                        p{role.priority}
+                        {role.isDefault ? " | default" : ""}
+                        {hasRoleBadgePermission(role.permissions) ? " | badge on" : ""}
+                      </time>
+                    </header>
+                    <p>{role.permissions.join(", ") || "No permissions"}</p>
+                  </article>
+                ))}
+              </div>
+
+              {runtime.isAdmin ? (
+                <>
+                  <form className="panel-form" onSubmit={handleCreateRole}>
+                    <label>
+                      New role name
+                      <input value={newRoleName} onChange={(event) => setNewRoleName(event.target.value)} />
+                    </label>
+                    <label>
+                      New role priority
+                      <input
+                        type="number"
+                        value={newRolePriority}
+                        onChange={(event) => setNewRolePriority(event.target.value)}
+                      />
+                    </label>
+                    <div className="panel-actions">
+                      <Button type="submit">Create role</Button>
+                    </div>
+                  </form>
+
+                  <div className="panel-form">
+                    <label>
+                      Edit role
+                      <select value={selectedRoleId} onChange={(event) => setSelectedRoleId(event.target.value)}>
+                        {roles.map((role) => (
+                          <option key={role.id} value={role.id}>
+                            {role.name} (p{role.priority})
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <div className="panel-chip-list" aria-label="Role wizard steps">
+                      <div className="panel-chip">
+                        <button type="button" className={roleWizardStep === 1 ? "active" : undefined} onClick={() => setRoleWizardStep(1)}>
+                          1. Preset
+                        </button>
+                      </div>
+                      <div className="panel-chip">
+                        <button type="button" className={roleWizardStep === 2 ? "active" : undefined} onClick={() => setRoleWizardStep(2)}>
+                          2. Details
+                        </button>
+                      </div>
+                      <div className="panel-chip">
+                        <button type="button" className={roleWizardStep === 3 ? "active" : undefined} onClick={() => setRoleWizardStep(3)}>
+                          3. Permissions
+                        </button>
+                      </div>
+                    </div>
+
+                    {roleWizardStep === 1 ? (
+                      <section className="panel-subcard admin-inline-subcard">
+                        <SectionTitle title="Step 1: Select Preset" subtitle="Choose baseline access profile for this role." />
+                        <div className="panel-actions">
+                          <Button
+                            size="sm"
+                            variant={rolePresetKey === "member_default" ? "primary" : "secondary"}
+                            onClick={() => applyRolePreset("member_default")}
+                          >
+                            Member
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant={rolePresetKey === "moderator_core" ? "primary" : "secondary"}
+                            onClick={() => applyRolePreset("moderator_core")}
+                          >
+                            Moderator
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant={rolePresetKey === "admin_core" ? "primary" : "secondary"}
+                            onClick={() => applyRolePreset("admin_core")}
+                          >
+                            Admin
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant={rolePresetKey === "owner_all" ? "primary" : "secondary"}
+                            onClick={() => applyRolePreset("owner_all")}
+                          >
+                            Owner
+                          </Button>
+                        </div>
+                        <p className="panel-summary">Selected preset: {rolePresetKey} | permissions: {rolePermissionsDraft.length}</p>
+                      </section>
+                    ) : null}
+
+                    {roleWizardStep === 2 ? (
+                      <section className="panel-subcard admin-inline-subcard">
+                        <SectionTitle title="Step 2: Role Details" subtitle="Set readable role name, priority and default role flag." />
+                        <label>
+                          Name
+                          <input value={roleNameDraft} onChange={(event) => setRoleNameDraft(event.target.value)} />
+                        </label>
+                        <label>
+                          Priority
+                          <input
+                            type="number"
+                            value={rolePriorityDraft}
+                            onChange={(event) => setRolePriorityDraft(event.target.value)}
+                          />
+                        </label>
+                        <label className="panel-inline-check">
+                          <input
+                            type="checkbox"
+                            checked={roleDefaultDraft}
+                            onChange={(event) => setRoleDefaultDraft(event.target.checked)}
+                          />
+                          <span>Default role for new users</span>
+                        </label>
+                        <label className="panel-inline-check">
+                          <input
+                            type="checkbox"
+                            checked={hasRoleBadgePermission(rolePermissionsDraft)}
+                            onChange={(event) => setRoleBadgeEnabled(event.target.checked)}
+                            disabled={rolePermissionsDraft.includes("*")}
+                          />
+                          <span>Show role badge near name in messages</span>
+                        </label>
+                      </section>
+                    ) : null}
+
+                    {roleWizardStep === 3 ? (
+                      <section className="panel-subcard admin-inline-subcard">
+                        <SectionTitle title="Step 3: Fine Tune Permissions" subtitle="Use checkboxes to refine access before saving role." />
+                        <div className="permission-grid">
+                          {ROLE_PERMISSION_GROUPS.map((group) => (
+                            <article key={group.label} className="permission-group-card">
+                              <header>
+                                <strong>{group.label}</strong>
+                              </header>
+                              <div className="permission-check-list">
+                                {group.permissions.map((permission) => (
+                                  <label key={`${group.label}:${permission}`} className="panel-inline-check">
+                                    <input
+                                      type="checkbox"
+                                      checked={rolePermissionsDraft.includes(permission) || rolePermissionsDraft.includes("*")}
+                                      onChange={() => toggleRolePermission(permission)}
+                                      disabled={rolePermissionsDraft.includes("*")}
+                                    />
+                                    <span>{permission}</span>
+                                  </label>
+                                ))}
+                              </div>
+                            </article>
+                          ))}
+                        </div>
+                      </section>
+                    ) : null}
+
+                    <div className="panel-actions">
+                      <Button size="sm" variant="secondary" onClick={() => setRoleWizardStep((prev) => (prev > 1 ? ((prev - 1) as 1 | 2 | 3) : prev))}>
+                        Back
+                      </Button>
+                      {roleWizardStep < 3 ? (
+                        <Button size="sm" variant="secondary" onClick={() => setRoleWizardStep((prev) => (prev < 3 ? ((prev + 1) as 1 | 2 | 3) : prev))}>
+                          Next
+                        </Button>
+                      ) : null}
+                      <Button onClick={() => void handleSaveRole()}>Save role</Button>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <RestrictionHint message="Admin role required for permission editing." variant="warning" />
+              )}
+            </section>
+          ) : null}
+
+          {pendingDangerAction ? (
+            <div className="admin-confirm-overlay" role="dialog" aria-modal="true" aria-label="Confirm moderation action">
+              <div className="admin-confirm-dialog">
+                <h3>Confirm Action</h3>
+                <p>
+                  Action: <strong>{pendingDangerAction.action}</strong>
+                </p>
+                <p>
+                  Member: <strong>{pendingDangerAction.shortUserId}</strong>
+                  {" "}|
+                  {" "}{pendingDangerAction.telegramUsername ? `@${pendingDangerAction.telegramUsername}` : "no_username"}
+                  {" "}|
+                  {" "}tg:{pendingDangerAction.telegramId ?? "no_tg_id"}
+                </p>
+                <p>Reason will be taken from `Action reason` field.</p>
+                <div className="panel-actions">
+                  <Button variant="secondary" onClick={() => setPendingDangerAction(null)}>
+                    Cancel
+                  </Button>
+                  <Button variant="danger" onClick={() => void confirmDangerAction()}>
+                    Confirm {pendingDangerAction.action}
+                  </Button>
+                </div>
+              </div>
             </div>
-          ) : (
-            <RestrictionHint message="Switch to admin/owner role to open these sections." />
-          )}
-        </div>
-      </Card>
+          ) : null}
+        </AdminPageScaffold>
+      </StateBlock>
     </PermissionGate>
   );
 }

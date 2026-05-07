@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
 
 import { CurrentUser } from "../../core/current-user.decorator.js";
 import { JwtAuthGuard } from "../../core/jwt-auth.guard.js";
@@ -9,6 +9,7 @@ import {
   ClearTimeoutMemberDto,
   KickMemberDto,
   MuteMemberDto,
+  ModerationHistoryQueryDto,
   TimeoutMemberDto,
   UnbanMemberDto,
   UnmuteMemberDto,
@@ -68,6 +69,15 @@ export class LimitsController {
   @Get("members")
   async listMembers(@Param("chatId") chatId: string, @CurrentUser() user: RequestUser) {
     return this.limitsService.listMembers(chatId, user);
+  }
+
+  @Get("members/moderation-history")
+  async listModerationHistory(
+    @Param("chatId") chatId: string,
+    @CurrentUser() user: RequestUser,
+    @Query() query: ModerationHistoryQueryDto
+  ) {
+    return this.limitsService.listModerationHistory(chatId, user, query);
   }
 
   @Post("members/:userId/unmute")

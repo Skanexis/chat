@@ -113,3 +113,16 @@ export class ClearTimeoutMemberDto {
   @MaxLength(500)
   reason?: string;
 }
+
+export class ModerationHistoryQueryDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  target_user_id?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(500)
+  limit?: number;
+}

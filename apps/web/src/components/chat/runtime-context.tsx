@@ -12,6 +12,7 @@ import type {
   ChatIdentity,
   ChatMessage,
   ChatView,
+  IncidentModeState,
   ReactionSummaryEntry,
   Session,
   WsAutomationRuleExecutedPayload,
@@ -25,6 +26,8 @@ import type {
   WsTicketUpdatedPayload
 } from "@/lib/types";
 import { connectChatSocket, type ChatSocket } from "@/lib/ws-client";
+
+const ROLE_BADGE_PERMISSION = "ui.role.badge.show";
 
 export type UiMessage = ChatMessage & {
   localStatus?: "pending" | "failed";
@@ -54,6 +57,10 @@ type ChatRuntimeValue = {
   liveBroadcastStateByCampaignId: Record<string, WsBroadcastStateChangedPayload>;
   liveBroadcastDeliveryByCampaignId: Record<string, WsBroadcastDeliveryProgressPayload>;
   liveIncidentMode: WsIncidentModeChangedPayload | null;
+  maintenanceState: IncidentModeState | null;
+  maintenanceEnabled: boolean;
+  maintenanceReason: string | null;
+  isMaintenanceBypass: boolean;
   liveReputationUpdates: WsReputationUpdatedPayload[];
   liveThreadSubscriptionTriggers: WsThreadSubscriptionTriggeredPayload[];
   liveInvalidation: {
@@ -65,6 +72,7 @@ type ChatRuntimeValue = {
   wsLastEventAt: string | null;
   draft: string;
   sending: boolean;
+  replyToMessageId: string | null;
   senderMode: SenderModeValue;
   roleName: string;
   isAdmin: boolean;
@@ -74,6 +82,8 @@ type ChatRuntimeValue = {
   senderOptions: Array<{ value: SenderModeValue; label: string; disabled?: boolean }>;
   currentUserId: string | null;
   setDraft: (value: string) => void;
+  setReplyToMessageId: (messageId: string | null) => void;
+  clearReplyToMessage: () => void;
   setSenderMode: (value: SenderModeValue) => void;
   reload: () => void;
   dismissError: () => void;
@@ -142,6 +152,7 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
     Record<string, WsBroadcastDeliveryProgressPayload>
   >({});
   const [liveIncidentMode, setLiveIncidentMode] = useState<WsIncidentModeChangedPayload | null>(null);
+  const [maintenanceState, setMaintenanceState] = useState<IncidentModeState | null>(null);
   const [liveReputationUpdates, setLiveReputationUpdates] = useState<WsReputationUpdatedPayload[]>([]);
   const [liveThreadSubscriptionTriggers, setLiveThreadSubscriptionTriggers] = useState<WsThreadSubscriptionTriggeredPayload[]>([]);
   const [liveInvalidation, setLiveInvalidation] = useState({
@@ -153,6 +164,7 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
   const [wsLastEventAt, setWsLastEventAt] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const [replyToMessageId, setReplyToMessageId] = useState<string | null>(null);
   const [wsConnected, setWsConnected] = useState(false);
   const [senderMode, setSenderMode] = useState<SenderModeValue>("as_user");
 
@@ -161,6 +173,8 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
   const rolePermissions = chat?.member.role.permissions ?? [];
   const normalizedRole = roleName.toLowerCase();
   const isOwnerLike = normalizedRole.includes("owner") || normalizedRole.includes("creator");
+  const isMaintenanceBypass =
+    normalizedRole.includes("owner") || normalizedRole.includes("creator") || normalizedRole.includes("administrator") || normalizedRole.includes("admin");
   const isAdminByName = normalizedRole.includes("admin") || isOwnerLike;
   const isAdminByPermission = rolePermissions.some((permission) =>
     permission.startsWith("role.") ||
@@ -183,6 +197,8 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
   );
   const isAdmin = isAdminByName || isAdminByPermission;
   const isModerator = isAdmin || isModeratorByName || isModeratorByPermission;
+  const maintenanceEnabled = maintenanceState !== null;
+  const maintenanceReason = maintenanceState?.reason ?? liveIncidentMode?.reason ?? null;
 
   const markWsEvent = useCallback((): void => {
     setWsLastEventAt(new Date().toISOString());
@@ -213,6 +229,7 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
         setLiveBroadcastStateByCampaignId({});
         setLiveBroadcastDeliveryByCampaignId({});
         setLiveIncidentMode(null);
+        setMaintenanceState(null);
         setLiveReputationUpdates([]);
         setLiveThreadSubscriptionTriggers([]);
         setLiveInvalidation({ invites: 0, webhooks: 0, threadSubscriptions: 0, reputation: 0 });
@@ -254,11 +271,19 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
           setSession(activeSession);
         }
 
-        const bootstrap = await api.getBootstrap(chatId, 120);
+        const [bootstrap, incidentMode] = await Promise.all([
+          api.getBootstrap(chatId, 120),
+          api.getIncidentModeState(chatId).catch(() => ({
+            ok: true as const,
+            enabled: false,
+            state: null
+          }))
+        ]);
         if (!alive) {
           return;
         }
         applyBootstrap(bootstrap);
+        setMaintenanceState(incidentMode.enabled ? incidentMode.state : null);
 
         socketRef.current?.disconnect();
         socketRef.current = connectChatSocket(appConfig.apiBaseUrl, activeSession.accessToken, chatId, {
@@ -335,6 +360,7 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
           onIncidentModeChanged: (payload) => {
             markWsEvent();
             setLiveIncidentMode(payload);
+            setMaintenanceState(payload.enabled ? payload.state : null);
           },
           onReputationUpdated: (payload) => {
             markWsEvent();
@@ -410,6 +436,7 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
   const canUseGroupSender = hasSenderPermission("message.send.as_group");
   const canUseRoleProfileSender =
     hasSenderPermission("message.send.as_group") && hasSenderPermission("message.send.as_group.profile.select");
+  const canShowOwnRoleBadge = hasSenderPermission(ROLE_BADGE_PERMISSION);
 
   useEffect(() => {
     if (senderMode === "as_group" && (!canUseGroupSender || !groupIdentity)) {
@@ -419,6 +446,15 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
       setSenderMode("as_user");
     }
   }, [canUseGroupSender, canUseRoleProfileSender, groupIdentity, roleProfileIdentity, senderMode]);
+
+  useEffect(() => {
+    if (!replyToMessageId) {
+      return;
+    }
+    if (!messages.some((message) => message.id === replyToMessageId)) {
+      setReplyToMessageId(null);
+    }
+  }, [messages, replyToMessageId]);
 
   const senderOptions = useMemo(() => {
     const options: Array<{ value: SenderModeValue; label: string; disabled?: boolean }> = [{ value: "as_user", label: "You" }];
@@ -484,6 +520,7 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
 
     const tempId = `tmp-${Date.now()}`;
     const now = new Date().toISOString();
+    const replyToId = replyToMessageId ?? undefined;
     const ownDisplayName =
       session?.user.username
         ? `@${session.user.username}`
@@ -500,9 +537,12 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
       displayAuthorId: identityId ?? (currentUserId ?? "unknown"),
       displayAuthorName: identityDisplayName ?? ownDisplayName,
       displayAuthorUsername: senderMode === "as_user" ? session?.user.username : undefined,
+      authorRoleName: roleName,
+      authorRoleBadgeEnabled: senderMode === "as_user" ? canShowOwnRoleBadge : false,
       senderMode,
       text,
       media: null,
+      replyToId: replyToId ?? null,
       isDeleted: false,
       createdAt: now,
       updatedAt: now,
@@ -514,11 +554,12 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
     setMessages((prev) => mergeMessage(prev, optimistic));
 
     try {
-      const created = await apiRef.current.createMessage(chat.id, text, senderMode, identityId);
+      const created = await apiRef.current.createMessage(chat.id, text, senderMode, identityId, replyToId);
       setMessages((prev) => {
         const withoutTemp = prev.filter((entry) => entry.id !== tempId);
         return mergeMessage(withoutTemp, created);
       });
+      setReplyToMessageId(null);
       setError(null);
     } catch (sendError) {
       setMessages((prev) =>
@@ -621,12 +662,17 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
       liveBroadcastStateByCampaignId,
       liveBroadcastDeliveryByCampaignId,
       liveIncidentMode,
+      maintenanceState,
+      maintenanceEnabled,
+      maintenanceReason,
+      isMaintenanceBypass,
       liveReputationUpdates,
       liveThreadSubscriptionTriggers,
       liveInvalidation,
       wsLastEventAt,
       draft,
       sending,
+      replyToMessageId,
       senderMode,
       roleName,
       isAdmin,
@@ -636,6 +682,8 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
       senderOptions,
       currentUserId,
       setDraft,
+      setReplyToMessageId,
+      clearReplyToMessage: () => setReplyToMessageId(null),
       setSenderMode,
       reload: () => setReloadToken((prev) => prev + 1),
       dismissError: () => setError(null),
@@ -660,6 +708,10 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
       liveBroadcastDeliveryByCampaignId,
       liveBroadcastStateByCampaignId,
       liveIncidentMode,
+      maintenanceState,
+      maintenanceEnabled,
+      maintenanceReason,
+      isMaintenanceBypass,
       liveReputationUpdates,
       liveThreadSubscriptionTriggers,
       liveInvalidation,
@@ -667,6 +719,7 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
       messages,
       reactionByMessage,
       ownReactionByMessage,
+      replyToMessageId,
       restrictionText,
       roleName,
       senderMode,

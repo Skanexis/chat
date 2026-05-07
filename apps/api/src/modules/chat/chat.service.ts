@@ -22,7 +22,11 @@ import {
 type MessageView = Message & {
   displayAuthorName?: string;
   displayAuthorUsername?: string;
+  authorRoleName?: string;
+  authorRoleBadgeEnabled?: boolean;
 };
+
+const ROLE_BADGE_PERMISSION = "ui.role.badge.show";
 
 @Injectable()
 export class ChatService {
@@ -48,6 +52,7 @@ export class ChatService {
     this.policy.assertMemberCanAccess(member);
     await this.policy.assertCan(chatId, member, "chat.view");
     const role = await this.db.getRole(chatId, member.roleId);
+    await this.assertMaintenanceAccess(chatId, role.name);
     return {
       ...(await this.db.getChat(chatId)),
       member: {
@@ -703,6 +708,22 @@ export class ChatService {
     return this.db.updateMemberStatus(chatId, member.userId, member.status === "muted" ? "active" : member.status, null);
   }
 
+  private async assertMaintenanceAccess(chatId: string, roleName: string): Promise<void> {
+    const active = await this.db.getActiveIncidentMode(chatId);
+    if (!active) {
+      return;
+    }
+    const normalizedRole = roleName.trim().toLowerCase();
+    const isBypassRole =
+      normalizedRole.includes("owner") ||
+      normalizedRole.includes("creator") ||
+      normalizedRole.includes("administrator") ||
+      normalizedRole.includes("admin");
+    if (!isBypassRole) {
+      throw new ForbiddenException("Maintenance mode is active. Access is temporarily limited to owner/administrator.");
+    }
+  }
+
   private async assertRoleLimits(chatId: string, member: ChatMember, userId: string, dto: CreateMessageDto): Promise<void> {
     const limits = await this.db.getRoleLimits(chatId, member.roleId);
     const hasAnyLimit =
@@ -848,7 +869,28 @@ export class ChatService {
       identityNameById = new Map(identities.map((identity) => [identity.id, identity.name]));
     }
 
+    const members = await this.db.listMembers(chatId);
+    const memberByUserId = new Map(members.map((entry) => [entry.userId, entry] as const));
+    const roleIds = Array.from(new Set(members.map((entry) => entry.roleId)));
+    const roles = await Promise.all(
+      roleIds.map(async (roleId) => {
+        try {
+          return await this.db.getRole(chatId, roleId);
+        } catch {
+          return null;
+        }
+      })
+    );
+    const roleById = new Map(roles.filter((entry): entry is NonNullable<typeof entry> => entry !== null).map((entry) => [entry.id, entry]));
+
     return messages.map((message) => {
+      const member = memberByUserId.get(message.authorId);
+      const role = member ? roleById.get(member.roleId) : undefined;
+      const authorRoleName = role?.name;
+      const authorRoleBadgeEnabled = Boolean(
+        role && (role.permissions.includes("*") || role.permissions.includes(ROLE_BADGE_PERMISSION))
+      );
+
       if (message.displayAuthorType === "user") {
         const user = usersById.get(message.displayAuthorId) ?? usersById.get(message.authorId);
         const fullName = [user?.firstName, user?.lastName].filter(Boolean).join(" ").trim();
@@ -856,14 +898,18 @@ export class ChatService {
         return {
           ...message,
           displayAuthorName,
-          displayAuthorUsername: user?.username
+          displayAuthorUsername: user?.username,
+          authorRoleName,
+          authorRoleBadgeEnabled
         };
       }
 
       const identityName = identityNameById.get(message.displayAuthorId);
       return {
         ...message,
-        displayAuthorName: identityName
+        displayAuthorName: identityName,
+        authorRoleName,
+        authorRoleBadgeEnabled
       };
     });
   }

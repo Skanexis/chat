@@ -9,6 +9,7 @@ import {
   BanMemberDto,
   ClearTimeoutMemberDto,
   KickMemberDto,
+  ModerationHistoryQueryDto,
   MuteMemberDto,
   TimeoutMemberDto,
   UnbanMemberDto,
@@ -166,6 +167,9 @@ export class LimitsService {
     members: Array<{
       id: string;
       userId: string;
+      shortUserId: string;
+      telegramId: number | null;
+      telegramUsername: string | null;
       roleId: string;
       roleName: string;
       rolePriority: number;
@@ -181,14 +185,22 @@ export class LimitsService {
 
     const [members, roles] = await Promise.all([this.db.listMembers(chatId), this.db.listRoles(chatId)]);
     const roleById = new Map(roles.map((role) => [role.id, role]));
+    const uniqueUserIds = Array.from(new Set(members.map((member) => member.userId)));
+    const usersById = new Map(
+      await Promise.all(uniqueUserIds.map(async (userId) => [userId, await this.db.getUserById(userId)] as const))
+    );
 
     return {
       chatId,
       members: members.map((member) => {
         const role = roleById.get(member.roleId);
+        const user = usersById.get(member.userId);
         return {
           id: member.id,
           userId: member.userId,
+          shortUserId: member.userId.length <= 8 ? member.userId : member.userId.slice(0, 8),
+          telegramId: user?.telegramId ?? null,
+          telegramUsername: user?.username ?? null,
           roleId: member.roleId,
           roleName: role?.name ?? "unknown",
           rolePriority: role?.priority ?? 0,
@@ -198,6 +210,48 @@ export class LimitsService {
           joinedAt: member.joinedAt
         };
       })
+    };
+  }
+
+  async listModerationHistory(
+    chatId: string,
+    requestUser: RequestUser,
+    query: ModerationHistoryQueryDto
+  ): Promise<{
+    chatId: string;
+    events: Array<{
+      id: string;
+      action: "member.ban" | "member.unban";
+      actorId: string;
+      targetId: string;
+      reason: string | null;
+      createdAt: string;
+    }>;
+  }> {
+    const actor = await this.db.ensureMember(chatId, requestUser.userId);
+    this.policy.assertMemberCanOperate(actor);
+    await this.policy.assertCan(chatId, actor, "member.view_list");
+
+    const targetFilter = query.target_user_id?.trim() ?? "";
+    const limit = query.limit ?? 120;
+    const all = await this.db.listAudit(chatId);
+    const events = all
+      .filter((entry) => entry.targetType === "member" && (entry.action === "member.ban" || entry.action === "member.unban"))
+      .filter((entry) => (targetFilter ? entry.targetId.includes(targetFilter) : true))
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+      .slice(0, limit)
+      .map((entry) => ({
+        id: entry.id,
+        action: entry.action as "member.ban" | "member.unban",
+        actorId: entry.actorId,
+        targetId: entry.targetId,
+        reason: this.extractAuditReason(entry.payload),
+        createdAt: entry.createdAt
+      }));
+
+    return {
+      chatId,
+      events
     };
   }
 
@@ -330,5 +384,14 @@ export class LimitsService {
       throw new NotFoundException(`Member ${userId} is not in chat ${chatId}.`);
     }
     return member;
+  }
+
+  private extractAuditReason(payload: Record<string, unknown>): string | null {
+    const raw = payload.reason;
+    if (typeof raw !== "string") {
+      return null;
+    }
+    const normalized = raw.trim();
+    return normalized.length > 0 ? normalized : null;
   }
 }

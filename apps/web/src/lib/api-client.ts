@@ -17,6 +17,7 @@ import type {
   ChatRole,
   ExportHistoryResult,
   IncidentModeResponse,
+  IncidentModeStatusResponse,
   IntegrationWebhookView,
   InvitesListResponse,
   JoinPolicy,
@@ -27,6 +28,7 @@ import type {
   LimitsOverview,
   ListTranslationsResponse,
   MemberProfileFieldsListResponse,
+  ModerationHistoryResponse,
   UpsertMemberProfileFieldResponse,
   DeleteMemberProfileFieldResponse,
   AssignMemberTagResponse,
@@ -146,12 +148,14 @@ export class ApiClient {
     chatId: string,
     text: string,
     senderMode: "as_user" | "as_group" | "as_role_profile" = "as_user",
-    identityId?: string
+    identityId?: string,
+    replyToId?: string
   ): Promise<ChatMessage> {
     const body: {
       text: string;
       sender_mode: "as_user" | "as_group" | "as_role_profile";
       identity_id?: string;
+      reply_to_id?: string;
     } = {
       text,
       sender_mode: senderMode
@@ -159,6 +163,9 @@ export class ApiClient {
 
     if (identityId) {
       body.identity_id = identityId;
+    }
+    if (replyToId) {
+      body.reply_to_id = replyToId;
     }
 
     return this.request<ChatMessage>(`/chats/${encodeURIComponent(chatId)}/messages`, {
@@ -1130,6 +1137,19 @@ export class ApiClient {
     });
   }
 
+  async listModerationHistory(
+    chatId: string,
+    query?: { target_user_id?: string; limit?: number }
+  ): Promise<ModerationHistoryResponse> {
+    const path = this.withQuery(`/chats/${encodeURIComponent(chatId)}/members/moderation-history`, {
+      target_user_id: query?.target_user_id,
+      limit: query?.limit === undefined ? undefined : String(query.limit)
+    });
+    return this.request<ModerationHistoryResponse>(path, {
+      method: "GET"
+    });
+  }
+
   async muteMember(chatId: string, userId: string, reason?: string): Promise<{ ok: true; member: ChatMemberRecord }> {
     return this.memberAction(chatId, userId, "mute", reason);
   }
@@ -1919,6 +1939,12 @@ export class ApiClient {
     return this.request<IncidentModeResponse>(`/chats/${encodeURIComponent(chatId)}/incident-mode/disable`, {
       method: "POST",
       body
+    });
+  }
+
+  async getIncidentModeState(chatId: string): Promise<IncidentModeStatusResponse> {
+    return this.request<IncidentModeStatusResponse>(`/chats/${encodeURIComponent(chatId)}/incident-mode/state`, {
+      method: "GET"
     });
   }
 

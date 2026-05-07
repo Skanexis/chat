@@ -15,6 +15,19 @@ export class IncidentModeService {
     private readonly eventBus: EventBusService
   ) {}
 
+  async getState(chatId: string, requestUser: RequestUser) {
+    const actor = await this.db.ensureMember(chatId, requestUser.userId);
+    this.policy.assertMemberCanAccess(actor);
+    await this.policy.assertCan(chatId, actor, "chat.view");
+
+    const active = await this.db.getActiveIncidentMode(chatId);
+    return {
+      ok: true,
+      enabled: Boolean(active),
+      state: active ?? null
+    };
+  }
+
   async enable(chatId: string, requestUser: RequestUser, dto: EnableIncidentModeDto) {
     const actor = await this.db.ensureMember(chatId, requestUser.userId);
     this.policy.assertMemberCanOperate(actor);

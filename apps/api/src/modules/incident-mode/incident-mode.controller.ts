@@ -1,4 +1,4 @@
-import { Body, Controller, Param, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, UseGuards } from "@nestjs/common";
 
 import { CurrentUser } from "../../core/current-user.decorator.js";
 import { JwtAuthGuard } from "../../core/jwt-auth.guard.js";
@@ -10,6 +10,11 @@ import { IncidentModeService } from "./incident-mode.service.js";
 @Controller("chats/:chatId/incident-mode")
 export class IncidentModeController {
   constructor(private readonly incidentModeService: IncidentModeService) {}
+
+  @Get("state")
+  async getState(@Param("chatId") chatId: string, @CurrentUser() user: RequestUser) {
+    return this.incidentModeService.getState(chatId, user);
+  }
 
   @Post("enable")
   async enable(@Param("chatId") chatId: string, @CurrentUser() user: RequestUser, @Body() dto: EnableIncidentModeDto) {

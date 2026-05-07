@@ -1,4 +1,4 @@
-import { type ChangeEvent, type FormEvent, type KeyboardEvent, useEffect, useRef } from "react";
+import { type ChangeEvent, type FormEvent, type KeyboardEvent, type ReactNode, useEffect, useRef } from "react";
 
 import { Avatar, Badge, Button, cn } from "@/design-system/primitives";
 
@@ -11,6 +11,11 @@ export type MessageItem = {
   id: string;
   authorName: string;
   authorId: string;
+  roleBadgeText?: string;
+  replyTo?: {
+    author: string;
+    text: string;
+  } | null;
   text: string;
   createdAtLabel: string;
   own: boolean;
@@ -28,6 +33,7 @@ type MessageBubbleProps = {
   selectedReaction?: string;
   onSelect?: () => void;
   onOpenActions?: () => void;
+  onReply?: () => void;
   onAddReaction: (reaction: string) => void | Promise<void>;
   onRemoveReaction: () => void | Promise<void>;
   onEdit?: () => void;
@@ -35,6 +41,75 @@ type MessageBubbleProps = {
 };
 
 const QUICK_REACTIONS = ["👍", "❤️", "🔥", "😂", "😮", "👏"] as const;
+const LINK_DETECT_REGEX = /(https?:\/\/[^\s<>"']+|www\.[^\s<>"']+|t\.me\/[^\s<>"']+)/gi;
+
+function parseLinkCandidate(raw: string): { href: string; label: string; suffix: string } | null {
+  let label = raw;
+  let suffix = "";
+  while (label.length > 0) {
+    const last = label.at(-1);
+    if (!last || !".,!?;:)]}".includes(last)) {
+      break;
+    }
+    if (last === ")") {
+      const openCount = (label.match(/\(/g) ?? []).length;
+      const closeCount = (label.match(/\)/g) ?? []).length;
+      if (closeCount <= openCount) {
+        break;
+      }
+    }
+    label = label.slice(0, -1);
+    suffix = `${last}${suffix}`;
+  }
+  if (label.length === 0) {
+    return null;
+  }
+  const href = /^https?:\/\//i.test(label) ? label : `https://${label}`;
+  if (!/^https?:\/\//i.test(href)) {
+    return null;
+  }
+  return { href, label, suffix };
+}
+
+function renderTextWithLinks(text: string): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  let lastIndex = 0;
+  for (const match of text.matchAll(LINK_DETECT_REGEX)) {
+    const start = match.index ?? 0;
+    if (start > lastIndex) {
+      nodes.push(text.slice(lastIndex, start));
+    }
+    const raw = match[0] ?? "";
+    const parsed = parseLinkCandidate(raw);
+    if (!parsed) {
+      nodes.push(raw);
+      lastIndex = start + raw.length;
+      continue;
+    }
+    nodes.push(
+      <a
+        key={`lnk:${start}:${parsed.href}`}
+        className="ds-inline-link"
+        href={parsed.href}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={(event) => {
+          event.stopPropagation();
+        }}
+      >
+        {parsed.label}
+      </a>
+    );
+    if (parsed.suffix) {
+      nodes.push(parsed.suffix);
+    }
+    lastIndex = start + raw.length;
+  }
+  if (lastIndex < text.length) {
+    nodes.push(text.slice(lastIndex));
+  }
+  return nodes;
+}
 
 export function MessageBubble({
   item,
@@ -42,6 +117,7 @@ export function MessageBubble({
   selectedReaction,
   onSelect,
   onOpenActions,
+  onReply,
   onAddReaction,
   onRemoveReaction,
   onEdit,
@@ -49,6 +125,9 @@ export function MessageBubble({
 }: MessageBubbleProps) {
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressTriggeredRef = useRef(false);
+  const swipeStartXRef = useRef<number | null>(null);
+  const swipeStartYRef = useRef<number | null>(null);
+  const swipeTriggeredRef = useRef(false);
 
   function clearLongPressTimer(): void {
     if (longPressTimerRef.current) {
@@ -85,17 +164,52 @@ export function MessageBubble({
           event.preventDefault();
           (onOpenActions ?? onSelect)?.();
         }}
-        onTouchStart={() => {
+        onTouchStart={(event) => {
           clearLongPressTimer();
           longPressTriggeredRef.current = false;
+          swipeTriggeredRef.current = false;
+          const touch = event.touches[0];
+          swipeStartXRef.current = touch?.clientX ?? null;
+          swipeStartYRef.current = touch?.clientY ?? null;
           longPressTimerRef.current = setTimeout(() => {
             longPressTriggeredRef.current = true;
             (onOpenActions ?? onSelect)?.();
           }, 360);
         }}
-        onTouchEnd={clearLongPressTimer}
-        onTouchCancel={clearLongPressTimer}
-        onTouchMove={clearLongPressTimer}
+        onTouchMove={(event) => {
+          if (swipeTriggeredRef.current || !onReply) {
+            return;
+          }
+          const touch = event.touches[0];
+          if (!touch) {
+            return;
+          }
+          if (swipeStartXRef.current === null || swipeStartYRef.current === null) {
+            return;
+          }
+          const dx = touch.clientX - swipeStartXRef.current;
+          const dy = touch.clientY - swipeStartYRef.current;
+          if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
+            clearLongPressTimer();
+          }
+          const directionMatch = item.own ? dx <= -62 : dx >= 62;
+          if (directionMatch && Math.abs(dx) > Math.abs(dy) * 1.3) {
+            swipeTriggeredRef.current = true;
+            longPressTriggeredRef.current = true;
+            clearLongPressTimer();
+            onReply();
+          }
+        }}
+        onTouchEnd={() => {
+          clearLongPressTimer();
+          swipeStartXRef.current = null;
+          swipeStartYRef.current = null;
+        }}
+        onTouchCancel={() => {
+          clearLongPressTimer();
+          swipeStartXRef.current = null;
+          swipeStartYRef.current = null;
+        }}
         onKeyDown={(event) => {
           if (event.key === "Enter" || event.key === " ") {
             event.preventDefault();
@@ -155,10 +269,19 @@ export function MessageBubble({
           </div>
         ) : null}
         <header className="ds-bubble-head">
-          <span>{item.own ? "You" : item.authorName}</span>
-          <time>{item.createdAtLabel}</time>
+          <div className="ds-bubble-author-line">
+            <span className="ds-author-name">{item.own ? "You" : item.authorName}</span>
+            {item.roleBadgeText ? <span className="ds-role-tag">{item.roleBadgeText}</span> : null}
+          </div>
+          <time className="ds-bubble-time">{item.createdAtLabel}</time>
         </header>
-        <p className={cn("ds-bubble-text", item.failed ? "is-failed" : undefined)}>{item.text}</p>
+        {item.replyTo ? (
+          <div className="ds-bubble-reply">
+            <strong>{item.replyTo.author}</strong>
+            <p>{renderTextWithLinks(item.replyTo.text)}</p>
+          </div>
+        ) : null}
+        <p className={cn("ds-bubble-text", item.failed ? "is-failed" : undefined)}>{renderTextWithLinks(item.text)}</p>
         <footer className="ds-bubble-foot">
           <div className="ds-meta-row">
             {item.edited ? <Badge variant="neutral">edited</Badge> : null}
@@ -229,6 +352,11 @@ type ComposerProps = {
   draft: string;
   sending: boolean;
   disabled?: boolean;
+  replyPreview?: {
+    author: string;
+    text: string;
+  } | null;
+  onCancelReply?: () => void;
   senderMode: SenderModeValue;
   senderOptions: SenderOption[];
   onSenderModeChange: (value: SenderModeValue) => void;
@@ -241,6 +369,8 @@ export function Composer({
   draft,
   sending,
   disabled = false,
+  replyPreview = null,
+  onCancelReply,
   senderMode,
   senderOptions,
   onSenderModeChange,
@@ -290,6 +420,17 @@ export function Composer({
 
   return (
     <form className="ds-composer" onSubmit={onSubmit}>
+      {replyPreview ? (
+        <div className="ds-reply-preview">
+          <div className="ds-reply-preview-body">
+            <strong>Reply to {replyPreview.author}</strong>
+            <p>{replyPreview.text}</p>
+          </div>
+          <button type="button" className="ds-reply-preview-cancel" onClick={onCancelReply}>
+            Cancel
+          </button>
+        </div>
+      ) : null}
       <div className="ds-mode-switch" role="tablist" aria-label="Sender mode">
         {senderOptions.map((option) => (
           <button
