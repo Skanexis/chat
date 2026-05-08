@@ -94,6 +94,8 @@ Detailed steps: [docs/POSTGRES_QUICKSTART.md](docs/POSTGRES_QUICKSTART.md)
   - encrypted payload: `encrypted_payload`
 - `encrypted_payload` and `text/media` are mutually exclusive.
 - Server stores ciphertext envelope only (`isEncrypted`, `encryptedPayload`) and does not decrypt message content.
+- If `CHAT_REQUIRE_ENCRYPTED_MESSAGES=true`, plaintext `text` is accepted and stored as a server-managed encrypted payload. Use `CHAT_SERVER_ENCRYPTION_KEY` for stable encryption across restarts/deploys.
+- In production/staging, startup fails when `ALLOW_INSECURE_INITDATA=true`, CORS origin allowlists are wildcarded, HSTS is disabled, or encrypted-only mode lacks a stable `CHAT_SERVER_ENCRYPTION_KEY`.
 - Frontend can send/read browser-encrypted AES-GCM payloads when `NEXT_PUBLIC_CHAT_ENCRYPTED_MESSAGES=true`; all clients must be built with the same `NEXT_PUBLIC_CHAT_ENCRYPTION_KEY` to display messages.
 - Encrypted messages are immutable via `PATCH /v1/chats/:chatId/messages/:messageId` (edit rejected).
 - Device key-bundle endpoints:

@@ -1,11 +1,12 @@
 import { BadRequestException, ForbiddenException, HttpException, HttpStatus, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 
 import { DATABASE_SERVICE } from "../../core/database.service.js";
 import type { DatabaseService } from "../../core/database.service.js";
 import { EventBusService } from "../../core/event-bus.service.js";
 import { PolicyService } from "../../core/policy.service.js";
-import type { ChatIdentity, ChatMember, Message, RequestUser, SavedMessageView } from "../../core/types.js";
+import type { ChatIdentity, ChatMember, E2EEncryptedPayload, Message, RequestUser, SavedMessageView } from "../../core/types.js";
 import { AntiAbuseViolationError, ChatAntiAbuseService } from "./chat-anti-abuse.service.js";
 import {
   ChatBootstrapQueryDto,
@@ -28,6 +29,9 @@ type MessageView = Message & {
 
 const ROLE_BADGE_PERMISSION = "ui.role.badge.show";
 const MESSAGE_DELETED_VIEW_PERMISSION = "message.deleted.view";
+const SERVER_MANAGED_ENCRYPTION_VERSION = "server-v1";
+const SERVER_MANAGED_ENCRYPTION_ALGORITHM = "aes-256-gcm";
+const SERVER_MANAGED_ENCRYPTION_KEY_ID = "server-managed-v1";
 
 @Injectable()
 export class ChatService {
@@ -48,7 +52,8 @@ export class ChatService {
       ["xchacha20-poly1305", "aes-256-gcm"]
     );
     this.requireEncryptedMessages =
-      (this.configService.get<string>("CHAT_REQUIRE_ENCRYPTED_MESSAGES", "false") ?? "false").toLowerCase() === "true";
+      (this.configService.get<string>("CHAT_REQUIRE_ENCRYPTED_MESSAGES", "false") ?? "false").trim().toLowerCase() === "true";
+    this.assertServerEncryptionConfig();
   }
 
   async getChat(chatId: string, requestUser: RequestUser) {
@@ -215,7 +220,12 @@ export class ChatService {
       }
     }
 
-    const isEncrypted = Boolean(dto.encrypted_payload);
+    const encryptedPayload = dto.encrypted_payload
+      ? this.mapEncryptedPayloadDto(dto.encrypted_payload)
+      : this.shouldEncryptPlainTextOnServer(dto)
+        ? this.encryptServerManagedText(chatId, dto.text!)
+        : null;
+    const isEncrypted = Boolean(encryptedPayload);
     const message = await this.db.createMessage({
       chatId,
       authorId: requestUser.userId,
@@ -230,17 +240,7 @@ export class ChatService {
       customSignature: dto.custom_signature ?? null,
       replyToId: dto.reply_to_id ?? null,
       isEncrypted,
-      encryptedPayload: dto.encrypted_payload
-        ? {
-            version: dto.encrypted_payload.version,
-            algorithm: dto.encrypted_payload.algorithm,
-            ciphertext: dto.encrypted_payload.ciphertext,
-            nonce: dto.encrypted_payload.nonce,
-            aad: dto.encrypted_payload.aad ?? null,
-            keyId: dto.encrypted_payload.key_id ?? null,
-            recipientKeyIds: dto.encrypted_payload.recipient_key_ids ?? null
-          }
-        : null
+      encryptedPayload
     });
 
     await this.db.addAuditLog({
@@ -254,7 +254,8 @@ export class ChatService {
         identityId: identity?.id ?? null,
         signatureMode: dto.signature_mode ?? null,
         isEncrypted,
-        e2eAlgorithm: dto.encrypted_payload?.algorithm ?? null
+        e2eAlgorithm: encryptedPayload?.algorithm ?? null,
+        serverManagedEncryption: encryptedPayload?.keyId === SERVER_MANAGED_ENCRYPTION_KEY_ID
       }
     });
     const enriched = await this.enrichMessageWithAuthorInfo(chatId, message);
@@ -617,8 +618,11 @@ export class ChatService {
     if (hasPlainPayload && hasEncryptedPayload) {
       throw new BadRequestException("encrypted_payload cannot be combined with text/media.");
     }
-    if (this.requireEncryptedMessages && !hasEncryptedPayload) {
-      throw new ForbiddenException("Encrypted-only mode is enabled. Plain text/media messages are not allowed.");
+    if (this.requireEncryptedMessages && !hasEncryptedPayload && dto.media) {
+      throw new ForbiddenException("Encrypted-only mode is enabled. Plain media messages are not allowed.");
+    }
+    if (this.requireEncryptedMessages && !hasEncryptedPayload && !dto.text) {
+      throw new ForbiddenException("Encrypted-only mode is enabled. Message text is required for server-side encryption.");
     }
 
     if (normalizedMember.status === "banned") {
@@ -1024,22 +1028,22 @@ export class ChatService {
         const user = usersById.get(message.displayAuthorId) ?? usersById.get(message.authorId);
         const fullName = [user?.firstName, user?.lastName].filter(Boolean).join(" ").trim();
         const displayAuthorName = user?.username ? `@${user.username}` : (fullName || undefined);
-        return {
+        return this.revealServerManagedMessage({
           ...message,
           displayAuthorName,
           displayAuthorUsername: user?.username,
           authorRoleName,
           authorRoleBadgeEnabled
-        };
+        });
       }
 
       const identityName = identityNameById.get(message.displayAuthorId);
-      return {
+      return this.revealServerManagedMessage({
         ...message,
         displayAuthorName: identityName,
         authorRoleName,
         authorRoleBadgeEnabled
-      };
+      });
     });
   }
 
@@ -1047,6 +1051,112 @@ export class ChatService {
     const floodWindow = this.parsePositiveInt(this.configService.get<string>("CHAT_FLOOD_WINDOW_SECONDS"), 10);
     const duplicateWindow = this.parsePositiveInt(this.configService.get<string>("CHAT_DUPLICATE_WINDOW_SECONDS"), 120);
     return Math.max(floodWindow, duplicateWindow, 1);
+  }
+
+  private shouldEncryptPlainTextOnServer(dto: CreateMessageDto): boolean {
+    return this.requireEncryptedMessages && !dto.encrypted_payload && Boolean(dto.text) && !dto.media;
+  }
+
+  private mapEncryptedPayloadDto(payload: NonNullable<CreateMessageDto["encrypted_payload"]>): E2EEncryptedPayload {
+    return {
+      version: payload.version,
+      algorithm: payload.algorithm,
+      ciphertext: payload.ciphertext,
+      nonce: payload.nonce,
+      aad: payload.aad ?? null,
+      keyId: payload.key_id ?? null,
+      recipientKeyIds: payload.recipient_key_ids ?? null
+    };
+  }
+
+  private encryptServerManagedText(chatId: string, text: string): E2EEncryptedPayload {
+    const nonce = randomBytes(12);
+    const aad = Buffer.from(JSON.stringify({ chatId, version: SERVER_MANAGED_ENCRYPTION_VERSION }), "utf8");
+    const cipher = createCipheriv("aes-256-gcm", this.resolveServerEncryptionKey(), nonce);
+    cipher.setAAD(aad);
+    const ciphertext = Buffer.concat([cipher.update(text, "utf8"), cipher.final(), cipher.getAuthTag()]);
+    return {
+      version: SERVER_MANAGED_ENCRYPTION_VERSION,
+      algorithm: SERVER_MANAGED_ENCRYPTION_ALGORITHM,
+      ciphertext: ciphertext.toString("base64"),
+      nonce: nonce.toString("base64"),
+      aad: aad.toString("base64"),
+      keyId: SERVER_MANAGED_ENCRYPTION_KEY_ID,
+      recipientKeyIds: [SERVER_MANAGED_ENCRYPTION_KEY_ID]
+    };
+  }
+
+  private revealServerManagedMessage(message: MessageView): MessageView {
+    if (!this.isServerManagedEncryptedPayload(message.encryptedPayload)) {
+      return message;
+    }
+
+    const text = this.decryptServerManagedText(message.chatId, message.encryptedPayload);
+    if (text === null) {
+      return message;
+    }
+
+    return {
+      ...message,
+      text,
+      isEncrypted: false,
+      encryptedPayload: null
+    };
+  }
+
+  private decryptServerManagedText(chatId: string, payload: E2EEncryptedPayload): string | null {
+    try {
+      const encrypted = Buffer.from(payload.ciphertext, "base64");
+      if (encrypted.length <= 16) {
+        return null;
+      }
+
+      const ciphertext = encrypted.subarray(0, encrypted.length - 16);
+      const authTag = encrypted.subarray(encrypted.length - 16);
+      const aad = payload.aad
+        ? Buffer.from(payload.aad, "base64")
+        : Buffer.from(JSON.stringify({ chatId, version: SERVER_MANAGED_ENCRYPTION_VERSION }), "utf8");
+      const decipher = createDecipheriv("aes-256-gcm", this.resolveServerEncryptionKey(), Buffer.from(payload.nonce, "base64"));
+      decipher.setAAD(aad);
+      decipher.setAuthTag(authTag);
+      return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
+    } catch {
+      return null;
+    }
+  }
+
+  private isServerManagedEncryptedPayload(payload: E2EEncryptedPayload | null | undefined): payload is E2EEncryptedPayload {
+    return (
+      Boolean(payload) &&
+      payload?.version === SERVER_MANAGED_ENCRYPTION_VERSION &&
+      payload?.algorithm?.toLowerCase() === SERVER_MANAGED_ENCRYPTION_ALGORITHM &&
+      payload?.keyId === SERVER_MANAGED_ENCRYPTION_KEY_ID
+    );
+  }
+
+  private resolveServerEncryptionKey(): Buffer {
+    const keyMaterial =
+      this.configService.get<string>("CHAT_SERVER_ENCRYPTION_KEY") ??
+      this.configService.get<string>("JWT_SECRET") ??
+      this.configService.get<string>("TELEGRAM_BOT_TOKEN") ??
+      "phantom-lab-chat-dev-server-encryption-key";
+    return createHash("sha256").update(keyMaterial).digest();
+  }
+
+  private assertServerEncryptionConfig(): void {
+    if (!this.requireEncryptedMessages) {
+      return;
+    }
+
+    const nodeEnv = (this.configService.get<string>("NODE_ENV", "development") ?? "development").trim().toLowerCase();
+    if (nodeEnv !== "production" && nodeEnv !== "staging") {
+      return;
+    }
+
+    const key = this.configService.get<string>("CHAT_SERVER_ENCRYPTION_KEY")?.trim();
+    if (!key || key.length < 32 || key === "change_this_server_message_encryption_key") {
+      throw new Error("CHAT_SERVER_ENCRYPTION_KEY must be a stable 32+ character secret when encrypted-only mode is enabled.");
+    }
   }
 
   private assertEncryptedPayloadPolicy(dto: CreateMessageDto): void {

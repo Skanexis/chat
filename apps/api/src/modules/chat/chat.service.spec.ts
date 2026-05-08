@@ -18,12 +18,16 @@ async function makeRequestUser(db: InMemoryDatabase, telegramId: number, usernam
   };
 }
 
-function createChatServiceFixture() {
+function createChatServiceFixture(configOverrides: Record<string, string> = {}) {
   const db = new InMemoryDatabase();
   const policy = new PolicyService(db);
   const eventBus = new EventBusService();
-  const antiAbuse = new ChatAntiAbuseService(new ConfigService());
-  const chatService = new ChatService(db, policy, eventBus, antiAbuse, new ConfigService());
+  const config = new ConfigService({
+    CHAT_REQUIRE_ENCRYPTED_MESSAGES: "false",
+    ...configOverrides
+  });
+  const antiAbuse = new ChatAntiAbuseService(config);
+  const chatService = new ChatService(db, policy, eventBus, antiAbuse, config);
   return { db, chatService };
 }
 
@@ -779,10 +783,11 @@ describe("ChatService message permission matrix", () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it("enforces encrypted-only mode when CHAT_REQUIRE_ENCRYPTED_MESSAGES=true", async () => {
-    process.env.CHAT_REQUIRE_ENCRYPTED_MESSAGES = "true";
-
-    const { db, chatService } = createChatServiceFixture();
+  it("stores plaintext as server-managed encrypted payload when CHAT_REQUIRE_ENCRYPTED_MESSAGES=true", async () => {
+    const { db, chatService } = createChatServiceFixture({
+      CHAT_REQUIRE_ENCRYPTED_MESSAGES: "true",
+      CHAT_SERVER_ENCRYPTION_KEY: "test-server-managed-message-key"
+    });
     const user = await makeRequestUser(db, 502505, "e2e_only_mode");
     const senderRole = await db.createRole({
       chatId: "main",
@@ -793,12 +798,32 @@ describe("ChatService message permission matrix", () => {
     });
     await db.updateMemberRole("main", user.userId, senderRole.id);
 
-    await expect(
-      chatService.createMessage("main", user, {
-        sender_mode: "as_user",
-        text: "plaintext should fail"
-      })
-    ).rejects.toBeInstanceOf(ForbiddenException);
+    const plaintext = await chatService.createMessage("main", user, {
+      sender_mode: "as_user",
+      text: "plaintext should be encrypted by server"
+    });
+
+    expect(plaintext).toMatchObject({
+      text: "plaintext should be encrypted by server",
+      isEncrypted: false,
+      encryptedPayload: null
+    });
+
+    const stored = await db.getMessage("main", plaintext.id);
+    expect(stored?.text).toBeUndefined();
+    expect(stored?.isEncrypted).toBe(true);
+    expect(stored?.encryptedPayload).toMatchObject({
+      version: "server-v1",
+      algorithm: "aes-256-gcm",
+      keyId: "server-managed-v1"
+    });
+
+    const listed = await chatService.listMessages("main", user);
+    expect(listed.find((message) => message.id === plaintext.id)).toMatchObject({
+      text: "plaintext should be encrypted by server",
+      isEncrypted: false,
+      encryptedPayload: null
+    });
 
     await expect(
       chatService.createMessage("main", user, {
@@ -814,7 +839,6 @@ describe("ChatService message permission matrix", () => {
       isEncrypted: true
     });
 
-    delete process.env.CHAT_REQUIRE_ENCRYPTED_MESSAGES;
   });
 
   it("blocks duplicate encrypted payload replay within duplicate window", async () => {

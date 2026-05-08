@@ -26,7 +26,40 @@ function normalizeCorpPolicy(raw: string | undefined): "same-origin" | "same-sit
   return "cross-origin";
 }
 
+function isProductionLike(): boolean {
+  const env = (process.env.NODE_ENV ?? "development").trim().toLowerCase();
+  return env === "production" || env === "staging";
+}
+
+function validateRuntimeSecurityConfig(): void {
+  if (!isProductionLike()) {
+    return;
+  }
+
+  const allowInsecureInitData = (process.env.ALLOW_INSECURE_INITDATA ?? "false").trim().toLowerCase() === "true";
+  if (allowInsecureInitData) {
+    throw new Error("ALLOW_INSECURE_INITDATA must be false in production/staging.");
+  }
+
+  const apiCors = (process.env.API_CORS_ORIGINS ?? "*").trim();
+  if (!apiCors || apiCors === "*") {
+    throw new Error("API_CORS_ORIGINS must be an explicit origin allowlist in production/staging.");
+  }
+
+  const wsCors = (process.env.WS_CORS_ORIGINS ?? "*").trim();
+  if (!wsCors || wsCors === "*") {
+    throw new Error("WS_CORS_ORIGINS must be an explicit origin allowlist in production/staging.");
+  }
+
+  const hstsEnabled = (process.env.ENABLE_HSTS ?? "false").trim().toLowerCase() === "true";
+  if (!hstsEnabled) {
+    throw new Error("ENABLE_HSTS must be true in production/staging.");
+  }
+}
+
 async function bootstrap(): Promise<void> {
+  validateRuntimeSecurityConfig();
+
   const bodyLimitBytes = (() => {
     const parsed = Number(process.env.API_BODY_LIMIT_BYTES ?? 1_048_576);
     if (!Number.isFinite(parsed) || parsed <= 0) {
