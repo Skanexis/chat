@@ -1,7 +1,7 @@
 export const appConfig = {
   apiBaseUrl: process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3000/v1",
   chatId: process.env.NEXT_PUBLIC_CHAT_ID ?? "main",
-  encryptedMessages: (process.env.NEXT_PUBLIC_CHAT_ENCRYPTED_MESSAGES ?? "false").toLowerCase() === "true",
+  encryptedMessages: (process.env.NEXT_PUBLIC_CHAT_ENCRYPTED_MESSAGES ?? "false").trim().toLowerCase() === "true",
   chatEncryptionKey: process.env.NEXT_PUBLIC_CHAT_ENCRYPTION_KEY ?? "",
   devInitData:
     process.env.NEXT_PUBLIC_DEV_INIT_DATA ??

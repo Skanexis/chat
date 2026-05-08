@@ -703,10 +703,7 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
     setMessages((prev) => mergeMessage(prev, optimistic));
 
     try {
-      const encryptedPayload = appConfig.encryptedMessages ? await encryptMessageText(chat.id, text) : undefined;
-      const created = await apiRef.current.createMessage(chat.id, text, senderMode, identityId, replyToId, {
-        encryptedPayload
-      });
+      const created = await createMessageWithEncryptionFallback(chat.id, text, senderMode, identityId, replyToId);
       const hydratedCreated = await hydrateMessage(created);
       setMessages((prev) => {
         const withoutTemp = prev.filter((entry) => entry.id !== tempId);
@@ -780,6 +777,31 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
       setError(null);
     } catch (reactionError) {
       setError(parseError(reactionError));
+    }
+  }
+
+  async function createMessageWithEncryptionFallback(
+    activeChatId: string,
+    text: string,
+    activeSenderMode: SenderModeValue,
+    identityId?: string,
+    replyToId?: string
+  ): Promise<ChatMessage> {
+    if (appConfig.encryptedMessages) {
+      return apiRef.current.createMessage(activeChatId, text, activeSenderMode, identityId, replyToId, {
+        encryptedPayload: await encryptMessageText(activeChatId, text)
+      });
+    }
+
+    try {
+      return await apiRef.current.createMessage(activeChatId, text, activeSenderMode, identityId, replyToId);
+    } catch (sendError) {
+      if (sendError instanceof ApiClientError && sendError.statusCode === 403 && sendError.message.includes("Encrypted-only mode")) {
+        return apiRef.current.createMessage(activeChatId, text, activeSenderMode, identityId, replyToId, {
+          encryptedPayload: await encryptMessageText(activeChatId, text)
+        });
+      }
+      throw sendError;
     }
   }
 
