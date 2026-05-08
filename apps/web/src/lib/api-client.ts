@@ -2001,9 +2001,10 @@ export class ApiClient {
         headers.authorization = `Bearer ${this.session.accessToken}`;
       }
 
+      const requestUrl = `${this.baseUrl}${path}`;
       let response: Response;
       try {
-        response = await fetch(`${this.baseUrl}${path}`, {
+        response = await fetch(requestUrl, {
           method,
           headers,
           body: options.body !== undefined ? JSON.stringify(options.body) : undefined
@@ -2015,9 +2016,9 @@ export class ApiClient {
         }
 
         if (networkError instanceof Error) {
-          throw new ApiClientError(`Network error: ${networkError.message}`, 0);
+          throw new ApiClientError(`Network error while requesting ${requestUrl}: ${networkError.message}`, 0);
         }
-        throw new ApiClientError("Network error: request failed", 0);
+        throw new ApiClientError(`Network error while requesting ${requestUrl}: request failed`, 0);
       }
 
       if (response.status === 401 && auth && allowRefresh && this.session?.refreshToken) {

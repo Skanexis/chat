@@ -12,6 +12,9 @@ COPY apps/api/package.json apps/api/package.json
 
 RUN pnpm install --frozen-lockfile --filter @phantom-lab/api...
 
+ARG SOURCE_COMMIT=local
+RUN echo "Building API from source commit $SOURCE_COMMIT"
+
 COPY apps/api apps/api
 
 WORKDIR /app/apps/api

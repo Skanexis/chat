@@ -12,6 +12,9 @@ COPY apps/web/package.json apps/web/package.json
 
 RUN pnpm install --frozen-lockfile --filter @phantom-lab/web...
 
+ARG SOURCE_COMMIT=local
+RUN echo "Building web from source commit $SOURCE_COMMIT"
+
 COPY apps/web apps/web
 
 ARG NEXT_PUBLIC_API_BASE_URL=http://localhost:3000/v1
@@ -30,6 +33,7 @@ ENV PORT=3001
 
 WORKDIR /app/apps/web
 
+RUN echo "Building web with NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL"
 RUN pnpm build
 
 EXPOSE 3001

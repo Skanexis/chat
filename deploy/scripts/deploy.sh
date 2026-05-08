@@ -19,7 +19,31 @@ set +a
 
 cd "$ROOT_DIR"
 
-docker compose -f "$COMPOSE_FILE" pull postgres redis
-docker compose -f "$COMPOSE_FILE" build --pull api web
-docker compose -f "$COMPOSE_FILE" up -d --remove-orphans
-docker compose -f "$COMPOSE_FILE" ps
+if grep -R "Encrypted-only mode is enabled. Plain text/media messages are not allowed" apps/api/src >/dev/null 2>&1; then
+  echo "Refusing to deploy: old encrypted-only 403 guard is still present in apps/api/src."
+  exit 1
+fi
+
+if ! grep -q "createMessageWithEncryptionFallback" apps/web/src/components/chat/runtime-context.tsx; then
+  echo "Refusing to deploy: web encrypted-message fallback is missing."
+  exit 1
+fi
+
+if ! grep -q "encrypted_payload" apps/web/src/lib/api-client.ts; then
+  echo "Refusing to deploy: web API client does not send encrypted_payload."
+  exit 1
+fi
+
+SOURCE_COMMIT="$(git rev-parse --short HEAD 2>/dev/null || date +%s)"
+export SOURCE_COMMIT
+
+docker compose --env-file "$WEB_ENV_FILE" -f "$COMPOSE_FILE" pull postgres redis
+docker compose --env-file "$WEB_ENV_FILE" -f "$COMPOSE_FILE" build --pull --no-cache api web
+docker compose --env-file "$WEB_ENV_FILE" -f "$COMPOSE_FILE" up -d --remove-orphans
+docker compose --env-file "$WEB_ENV_FILE" -f "$COMPOSE_FILE" ps
+
+docker compose --env-file "$WEB_ENV_FILE" -f "$COMPOSE_FILE" exec -T api sh -lc \
+  'if grep -R "Encrypted-only mode is enabled. Plain text/media messages are not allowed" -n /app/apps/api/dist 2>/dev/null; then exit 1; fi'
+
+docker compose --env-file "$WEB_ENV_FILE" -f "$COMPOSE_FILE" exec -T web sh -lc \
+  'grep -R "encrypted_payload" -n /app/apps/web/.next/server /app/apps/web/.next/static 2>/dev/null | head -1 >/dev/null'
