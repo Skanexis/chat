@@ -95,6 +95,7 @@ export class RolesService {
     await this.policy.assertCan(chatId, actor, "role.assign");
     const role = await this.db.getRole(chatId, roleId);
     const targetMember = await this.getExistingMember(chatId, dto.userId);
+    await this.policy.assertTargetIsNotWildcardMember(chatId, targetMember);
     await this.policy.assertCanManageMember(chatId, actor, targetMember);
     await this.policy.assertCanManageRole(chatId, actor, role.id);
 
@@ -127,6 +128,7 @@ export class RolesService {
 
     const role = await this.db.getRole(chatId, roleId);
     const targetMember = await this.getExistingMember(chatId, dto.userId);
+    await this.policy.assertTargetIsNotWildcardMember(chatId, targetMember);
     await this.policy.assertCanManageMember(chatId, actor, targetMember);
     await this.policy.assertCanManageRole(chatId, actor, role.id);
     if (targetMember.roleId !== roleId) {

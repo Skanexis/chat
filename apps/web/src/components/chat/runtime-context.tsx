@@ -582,13 +582,13 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
     return options;
   }, [canUseGroupSender, canUseRoleProfileSender, groupIdentity, roleProfileIdentity]);
 
-  const canSend = chat?.member.status !== "banned" && (canSendText || canDeleteAnyMessages);
+  const canSend = (chat?.member.status !== "banned" || isDeveloper) && (canSendText || canDeleteAnyMessages);
   const restrictionText =
-    chat?.member.status === "muted"
+    chat?.member.status === "muted" && !isDeveloper
       ? "You are muted in this chat. Sending is temporarily disabled."
-      : chat?.member.status === "readonly"
+      : chat?.member.status === "readonly" && !isDeveloper
         ? "This room is read-only for your role."
-      : chat?.member.status === "banned"
+      : chat?.member.status === "banned" && !isDeveloper
           ? "You are banned from posting in this room."
         : canUsePurgeCommand
           ? "Moderation mode: only /purge command is available for your role."

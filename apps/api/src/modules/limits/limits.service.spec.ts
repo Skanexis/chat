@@ -122,6 +122,46 @@ describe("LimitsService moderation/member management", () => {
     await expect(limitsService.muteMember("main", "missing-user-id", actor, {})).rejects.toBeInstanceOf(NotFoundException);
   });
 
+  it("prevents wildcard developer members from mute, timeout, kick, and ban", async () => {
+    const { db, limitsService } = createLimitsFixture();
+    const operatorRole = await db.createRole({
+      chatId: "main",
+      name: "moderation_operator_high",
+      priority: 9999,
+      isDefault: false,
+      permissions: ["member.mute", "member.timeout.set", "member.kick", "member.ban"]
+    });
+    const developerRole = await db.createRole({
+      chatId: "main",
+      name: "developer",
+      priority: 9500,
+      isDefault: false,
+      permissions: ["*"]
+    });
+
+    const actor = await makeRequestUser(db, 730009, "mod_against_dev");
+    const developer = await makeRequestUser(db, 730010, "protected_developer");
+    await db.updateMemberRole("main", actor.userId, operatorRole.id);
+    await db.updateMemberRole("main", developer.userId, developerRole.id);
+
+    await expect(limitsService.muteMember("main", developer.userId, actor, { reason: "no" })).rejects.toBeInstanceOf(
+      ForbiddenException
+    );
+    await expect(limitsService.timeoutMember("main", developer.userId, actor, { seconds: 60, reason: "no" })).rejects.toBeInstanceOf(
+      ForbiddenException
+    );
+    await expect(limitsService.kickMember("main", developer.userId, actor, { reason: "no" })).rejects.toBeInstanceOf(
+      ForbiddenException
+    );
+    await expect(limitsService.banMember("main", developer.userId, actor, { reason: "no" })).rejects.toBeInstanceOf(
+      ForbiddenException
+    );
+
+    const protectedMember = await db.ensureMember("main", developer.userId);
+    expect(protectedMember.status).toBe("active");
+    expect(protectedMember.roleId).toBe(developerRole.id);
+  });
+
   it("denies moderation actions when actor is not active", async () => {
     const { db, limitsService } = createLimitsFixture();
     const operatorRole = await db.createRole({

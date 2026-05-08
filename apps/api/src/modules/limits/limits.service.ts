@@ -82,6 +82,7 @@ export class LimitsService {
     this.policy.assertMemberCanOperate(actor);
     await this.policy.assertCan(chatId, actor, "member.mute");
     const target = await this.getExistingMember(chatId, userId);
+    await this.policy.assertTargetIsNotWildcardMember(chatId, target);
     await this.policy.assertCanManageMember(chatId, actor, target);
 
     const updated = await this.db.updateMemberStatus(chatId, userId, "muted", null);
@@ -109,6 +110,7 @@ export class LimitsService {
       await this.policy.assertCan(chatId, actor, "member.mute");
     }
     const target = await this.getExistingMember(chatId, userId);
+    await this.policy.assertTargetIsNotWildcardMember(chatId, target);
     await this.policy.assertCanManageMember(chatId, actor, target);
 
     const mutedUntil = new Date(Date.now() + dto.seconds * 1000).toISOString();
@@ -363,6 +365,7 @@ export class LimitsService {
     this.policy.assertMemberCanOperate(actor);
     await this.policy.assertCan(chatId, actor, "member.ban");
     const current = await this.getExistingMember(chatId, userId);
+    await this.policy.assertTargetIsNotWildcardMember(chatId, current);
     await this.policy.assertCanManageMember(chatId, actor, current);
 
     const updated = await this.db.updateMemberStatus(chatId, userId, "banned", null);
@@ -394,6 +397,7 @@ export class LimitsService {
     this.policy.assertMemberCanOperate(actor);
     await this.policy.assertCan(chatId, actor, "member.kick");
     const current = await this.getExistingMember(chatId, userId);
+    await this.policy.assertTargetIsNotWildcardMember(chatId, current);
     await this.policy.assertCanManageMember(chatId, actor, current);
 
     const roles = await this.db.listRoles(chatId);

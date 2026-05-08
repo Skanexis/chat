@@ -268,6 +268,16 @@ export class InMemoryDatabase implements DatabaseService {
   async ensureMember(chatId: string, userId: string): Promise<ChatMember> {
     const existing = await this.getMember(chatId, userId);
     if (existing) {
+      const role = await this.getRole(chatId, existing.roleId);
+      if (role.permissions.includes("*") && (existing.status !== "active" || existing.mutedUntil)) {
+        const updated: ChatMember = {
+          ...existing,
+          status: "active",
+          mutedUntil: null
+        };
+        this.members.set(existing.id, updated);
+        return updated;
+      }
       return existing;
     }
     const chat = await this.getChat(chatId);

@@ -354,6 +354,22 @@ export class PrismaDatabaseService implements DatabaseService {
         status: PrismaMemberStatus.active
       }
     });
+    const role = await this.getRole(chatId, member.roleId);
+    if (role.permissions.includes("*") && (member.status !== PrismaMemberStatus.active || member.mutedUntil)) {
+      const restored = await this.prisma.chatMember.update({
+        where: {
+          chatId_userId: {
+            chatId,
+            userId
+          }
+        },
+        data: {
+          status: PrismaMemberStatus.active,
+          mutedUntil: null
+        }
+      });
+      return this.mapMember(restored);
+    }
     return this.mapMember(member);
   }
 

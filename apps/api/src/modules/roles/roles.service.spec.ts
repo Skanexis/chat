@@ -95,6 +95,40 @@ describe("RolesService member role assignment", () => {
     );
   });
 
+  it("prevents downgrading wildcard developer members by assign or unassign", async () => {
+    const { db, rolesService } = createRolesFixture();
+    const actor = await makeRequestUser(db, 740203, "role_actor_against_dev");
+    const developer = await makeRequestUser(db, 740204, "role_protected_developer");
+
+    const operatorRole = await db.createRole({
+      chatId: "main",
+      name: "role_operator_against_dev",
+      priority: 9999,
+      permissions: ["role.assign", "role.unassign"]
+    });
+    const developerRole = await db.createRole({
+      chatId: "main",
+      name: "developer",
+      priority: 9500,
+      permissions: ["*"]
+    });
+    await db.updateMemberRole("main", actor.userId, operatorRole.id);
+    await db.updateMemberRole("main", developer.userId, developerRole.id);
+
+    const readonlyRole = (await db.listRoles("main")).find((role) => role.name === "readonly");
+    expect(readonlyRole).toBeDefined();
+
+    await expect(rolesService.assignRole("main", readonlyRole!.id, actor, { userId: developer.userId })).rejects.toBeInstanceOf(
+      ForbiddenException
+    );
+    await expect(rolesService.unassignRole("main", developerRole.id, actor, { userId: developer.userId })).rejects.toBeInstanceOf(
+      ForbiddenException
+    );
+
+    const protectedMember = await db.ensureMember("main", developer.userId);
+    expect(protectedMember.roleId).toBe(developerRole.id);
+  });
+
   it("enforces role hierarchy for create/update/assign operations", async () => {
     const { db, rolesService } = createRolesFixture();
     const actor = await makeRequestUser(db, 740301, "actor_hierarchy");

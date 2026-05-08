@@ -112,8 +112,14 @@ export class PolicyService {
     }
   }
 
-  private async isWildcardMember(chatId: string, member: ChatMember): Promise<boolean> {
+  async isWildcardMember(chatId: string, member: ChatMember): Promise<boolean> {
     const permissions = await this.getRolePermissions(chatId, member);
     return permissions.has("*");
+  }
+
+  async assertTargetIsNotWildcardMember(chatId: string, target: ChatMember): Promise<void> {
+    if (await this.isWildcardMember(chatId, target)) {
+      throw new ForbiddenException("Members with wildcard permissions cannot be muted, kicked, banned, or downgraded.");
+    }
   }
 }

@@ -787,3 +787,5 @@
 - [x] Final backend hardening pass: focused E2E/regression scenarios + load/reliability smoke for handoff to frontend integration.
 - [x] Frontend integration handoff: publish API consumption checklist + prioritized E2E matrix for Mini App client wiring.
 - [x] Frontend implementation kickoff: wire P0 flows (auth/bootstrap/send/edit/delete/reactions/typing) and run E2E-P0 matrix.
+
+- [x] Front implementation.

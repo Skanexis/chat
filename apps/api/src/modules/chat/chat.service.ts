@@ -618,23 +618,19 @@ export class ChatService {
     if (hasPlainPayload && hasEncryptedPayload) {
       throw new BadRequestException("encrypted_payload cannot be combined with text/media.");
     }
-    if (this.requireEncryptedMessages && !hasEncryptedPayload && dto.media) {
-      throw new ForbiddenException("Encrypted-only mode is enabled. Plain media messages are not allowed.");
-    }
-    if (this.requireEncryptedMessages && !hasEncryptedPayload && !dto.text) {
-      throw new ForbiddenException("Encrypted-only mode is enabled. Message text is required for server-side encryption.");
-    }
-
+    const role = await this.db.getRole(chatId, normalizedMember.roleId);
+    const bypassStatusGuards = role.permissions.includes("*");
+    const bypassAntiAbuseChecks = bypassStatusGuards || role.permissions.includes("message.send.text");
     if (normalizedMember.status === "banned") {
       throw new ForbiddenException("You are banned in this chat.");
     }
-    if (normalizedMember.status === "readonly") {
+    if (!bypassStatusGuards && normalizedMember.status === "readonly") {
       throw new ForbiddenException("Your role is readonly.");
     }
-    if (normalizedMember.status === "muted") {
+    if (!bypassStatusGuards && normalizedMember.status === "muted") {
       throw new ForbiddenException("You are muted.");
     }
-    if (normalizedMember.mutedUntil && new Date(normalizedMember.mutedUntil).getTime() > Date.now()) {
+    if (!bypassStatusGuards && normalizedMember.mutedUntil && new Date(normalizedMember.mutedUntil).getTime() > Date.now()) {
       throw new ForbiddenException("You are muted until " + normalizedMember.mutedUntil);
     }
 
@@ -672,31 +668,33 @@ export class ChatService {
       }
     }
 
-    const role = await this.db.getRole(chatId, normalizedMember.roleId);
-
-    try {
-      this.antiAbuse.assertMaxLengthByRole(dto.text, role.name);
-      if (!hasEncryptedPayload) {
-        this.antiAbuse.assertBlockedContentPolicy(dto.text);
-        this.antiAbuse.assertMediaPolicy(dto.media ?? null);
-        this.antiAbuse.assertTextDomainPolicy(dto.text);
+    if (!bypassAntiAbuseChecks) {
+      try {
+        this.antiAbuse.assertMaxLengthByRole(dto.text, role.name);
+        if (!hasEncryptedPayload) {
+          this.antiAbuse.assertBlockedContentPolicy(dto.text);
+          this.antiAbuse.assertMediaPolicy(dto.media ?? null);
+          this.antiAbuse.assertTextDomainPolicy(dto.text);
+        }
+        const recentOwnMessages = await this.db.listMessagesByAuthorSince(
+          chatId,
+          userId,
+          new Date(Date.now() - this.antiAbuseWindowSeconds * 1000).toISOString()
+        );
+        this.antiAbuse.assertDuplicateAndFlood(userId, dto.text, recentOwnMessages, {
+          encryptedFingerprint: dto.encrypted_payload ? this.buildEncryptedFingerprint(dto.encrypted_payload) : undefined
+        });
+      } catch (error) {
+        if (error instanceof AntiAbuseViolationError) {
+          await this.applyAutoSanction(chatId, normalizedMember, error);
+        }
+        throw error;
       }
-      const recentOwnMessages = await this.db.listMessagesByAuthorSince(
-        chatId,
-        userId,
-        new Date(Date.now() - this.antiAbuseWindowSeconds * 1000).toISOString()
-      );
-      this.antiAbuse.assertDuplicateAndFlood(userId, dto.text, recentOwnMessages, {
-        encryptedFingerprint: dto.encrypted_payload ? this.buildEncryptedFingerprint(dto.encrypted_payload) : undefined
-      });
-    } catch (error) {
-      if (error instanceof AntiAbuseViolationError) {
-        await this.applyAutoSanction(chatId, normalizedMember, error);
-      }
-      throw error;
     }
 
-    await this.assertRoleLimits(chatId, normalizedMember, userId, dto);
+    if (!bypassStatusGuards) {
+      await this.assertRoleLimits(chatId, normalizedMember, userId, dto);
+    }
   }
 
   private async ensureCanEdit(chatId: string, member: ChatMember, message: Message, userId: string): Promise<void> {
@@ -1054,7 +1052,7 @@ export class ChatService {
   }
 
   private shouldEncryptPlainTextOnServer(dto: CreateMessageDto): boolean {
-    return this.requireEncryptedMessages && !dto.encrypted_payload && Boolean(dto.text) && !dto.media;
+    return this.requireEncryptedMessages && !dto.encrypted_payload && Boolean(dto.text);
   }
 
   private mapEncryptedPayloadDto(payload: NonNullable<CreateMessageDto["encrypted_payload"]>): E2EEncryptedPayload {

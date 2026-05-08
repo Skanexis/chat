@@ -251,6 +251,95 @@ describe("ChatService message permission matrix", () => {
     delete process.env.CHAT_AUTOSANCTION_ENABLED;
   });
 
+  it("lets wildcard developer roles send pasted text without anti-abuse autosanction", async () => {
+    process.env.CHAT_BLOCKED_KEYWORDS = "developerblocked";
+    process.env.CHAT_AUTOSANCTION_ENABLED = "true";
+    process.env.CHAT_AUTOSANCTION_STEP1 = "short_mute";
+
+    const { db, chatService } = createChatServiceFixture();
+    const user = await makeRequestUser(db, 501402, "developer_paste_user");
+    const developerRole = await db.createRole({
+      chatId: "main",
+      name: "developer",
+      priority: 9500,
+      permissions: ["*"],
+      isDefault: false
+    });
+    await db.updateMemberRole("main", user.userId, developerRole.id);
+
+    const pastedText = Array.from({ length: 20 }, (_, index) => `copied line ${index + 1} developerblocked`).join("\n");
+
+    await expect(
+      chatService.createMessage("main", user, {
+        sender_mode: "as_user",
+        text: pastedText
+      })
+    ).resolves.toMatchObject({ text: pastedText });
+
+    const member = await db.getMember("main", user.userId);
+    expect(member?.status).toBe("active");
+
+    await db.updateMemberStatus("main", user.userId, "muted", new Date(Date.now() + 60_000).toISOString());
+    await expect(
+      chatService.createMessage("main", user, {
+        sender_mode: "as_user",
+        text: `${pastedText}\nafter previous autosanction`
+      })
+    ).resolves.toBeDefined();
+
+    delete process.env.CHAT_BLOCKED_KEYWORDS;
+    delete process.env.CHAT_AUTOSANCTION_ENABLED;
+    delete process.env.CHAT_AUTOSANCTION_STEP1;
+  });
+
+  it("skips spam and max-length checks but keeps role limits for roles that can send text", async () => {
+    process.env.CHAT_MAX_TEXT_LENGTH_DEFAULT = "5";
+    process.env.CHAT_BLOCKED_KEYWORDS = "blockedforwriters";
+    process.env.CHAT_DUPLICATE_THRESHOLD = "2";
+    process.env.CHAT_DUPLICATE_WINDOW_SECONDS = "300";
+    process.env.CHAT_AUTOSANCTION_ENABLED = "true";
+    process.env.CHAT_AUTOSANCTION_STEP1 = "short_mute";
+
+    const { db, chatService } = createChatServiceFixture();
+    const user = await makeRequestUser(db, 501403, "writer_bypass_user");
+    const writerRole = await db.createRole({
+      chatId: "main",
+      name: "writer_no_content_limits",
+      priority: 500,
+      permissions: ["chat.view", "message.send.text"],
+      isDefault: false
+    });
+    await db.updateMemberRole("main", user.userId, writerRole.id);
+    await db.upsertRoleLimits("main", writerRole.id, {
+      messagesPerDay: 1,
+      exceedAction: "reject"
+    });
+
+    const text = "123456 blockedforwriters";
+    await expect(
+      chatService.createMessage("main", user, {
+        sender_mode: "as_user",
+        text
+      })
+    ).resolves.toMatchObject({ text });
+    await expect(
+      chatService.createMessage("main", user, {
+        sender_mode: "as_user",
+        text
+      })
+    ).rejects.toBeInstanceOf(HttpException);
+
+    const member = await db.getMember("main", user.userId);
+    expect(member?.status).toBe("active");
+
+    delete process.env.CHAT_MAX_TEXT_LENGTH_DEFAULT;
+    delete process.env.CHAT_BLOCKED_KEYWORDS;
+    delete process.env.CHAT_DUPLICATE_THRESHOLD;
+    delete process.env.CHAT_DUPLICATE_WINDOW_SECONDS;
+    delete process.env.CHAT_AUTOSANCTION_ENABLED;
+    delete process.env.CHAT_AUTOSANCTION_STEP1;
+  });
+
   it("enforces max text length by role", async () => {
     process.env.CHAT_MAX_TEXT_LENGTH_DEFAULT = "5";
 
