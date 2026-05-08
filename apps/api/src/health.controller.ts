@@ -7,6 +7,7 @@ export class HealthController {
     return {
       ok: true,
       service: "phantom-lab-api",
+      sourceCommit: process.env.SOURCE_COMMIT ?? "unknown",
       timestamp: new Date().toISOString()
     };
   }

@@ -47,3 +47,26 @@ docker compose --env-file "$WEB_ENV_FILE" -f "$COMPOSE_FILE" exec -T api sh -lc 
 
 docker compose --env-file "$WEB_ENV_FILE" -f "$COMPOSE_FILE" exec -T web sh -lc \
   'grep -R "encrypted_payload" -n /app/apps/web/.next/server /app/apps/web/.next/static 2>/dev/null | head -1 >/dev/null'
+
+if command -v curl >/dev/null 2>&1; then
+  HEALTH_URL="${NEXT_PUBLIC_API_BASE_URL%/}/health"
+  HEALTH_JSON="$(curl -fsS "$HEALTH_URL")"
+  echo "$HEALTH_JSON"
+  if ! printf '%s' "$HEALTH_JSON" | grep -q "\"sourceCommit\":\"$SOURCE_COMMIT\""; then
+    echo "Public API $HEALTH_URL is not serving source commit $SOURCE_COMMIT."
+    echo "Check nginx upstream/ports: the domain is likely pointing at an old API process."
+    exit 1
+  fi
+
+  WEB_ORIGIN="${NEXT_PUBLIC_API_BASE_URL%%/v1*}"
+  if [[ "$WEB_ORIGIN" == http* ]]; then
+    WEB_HEADERS="$(curl -fsSI "$WEB_ORIGIN" || true)"
+    echo "$WEB_HEADERS"
+    if ! printf '%s' "$WEB_HEADERS" | grep -qi "x-source-commit: $SOURCE_COMMIT"; then
+      echo "Warning: public web $WEB_ORIGIN did not return x-source-commit: $SOURCE_COMMIT."
+      echo "If Telegram still shows old UI, clear WebView cache or verify nginx points at this web container."
+    fi
+  fi
+else
+  echo "curl not found; skipped public API/web commit verification."
+fi

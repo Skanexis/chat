@@ -43,6 +43,8 @@ services:
     restart: unless-stopped
     env_file:
       - ./env/api.env
+    environment:
+      SOURCE_COMMIT: ${SOURCE_COMMIT-local}
     depends_on:
       postgres:
         condition: service_healthy
@@ -71,9 +73,13 @@ services:
         NEXT_PUBLIC_CHAT_ENCRYPTION_KEY: ${NEXT_PUBLIC_CHAT_ENCRYPTION_KEY-}
         NEXT_PUBLIC_DEV_INIT_DATA: ${NEXT_PUBLIC_DEV_INIT_DATA-}
         SOURCE_COMMIT: ${SOURCE_COMMIT-local}
+        NEXT_PUBLIC_SOURCE_COMMIT: ${SOURCE_COMMIT-local}
     restart: unless-stopped
     env_file:
       - ./env/web.env
+    environment:
+      SOURCE_COMMIT: ${SOURCE_COMMIT-local}
+      NEXT_PUBLIC_SOURCE_COMMIT: ${SOURCE_COMMIT-local}
     depends_on:
       api:
         condition: service_healthy
