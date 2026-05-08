@@ -137,7 +137,7 @@ cat ~/.ssh/id_ed25519.pub
 ```bash
 sudo mkdir -p /opt/phantom-lab-chat
 sudo chown -R deploy:deploy /opt/phantom-lab-chat
-git clone git@github.com:YOUR_USER/phantom-lab-chat.git /opt/phantom-lab-chat
+git clone git@github.com:Skanexis/chat.git /opt/phantom-lab-chat
 cd /opt/phantom-lab-chat
 ```
 
@@ -168,7 +168,6 @@ nano deploy/env/web.env
   - `DATABASE_URL` (должен совпадать с логином/паролем Postgres)
   - `JWT_SECRET` (строка 32+ символа)
   - `TELEGRAM_BOT_TOKEN` (реальный токен бота)
-  - `TELEGRAM_ACCESS_CHAT_ID` (обязательный chat id группы/канала, если вход в Mini App только для участников этой группы)
   - `API_CORS_ORIGINS` и `WS_CORS_ORIGINS` (ваш домен)
 - `deploy/env/web.env`
   - `NEXT_PUBLIC_API_BASE_URL=https://chat.example.com/v1`
@@ -228,8 +227,8 @@ sudo nginx -t && sudo systemctl reload nginx
 На сервере:
 
 ```bash
-curl -I https://chat.example.com
-curl -sS https://chat.example.com/v1/health
+curl -I https://chat.ristoranti-d-italia.com
+curl -sS https://chat.ristoranti-d-italia.com/v1/health
 ```
 
 Должно вернуться `200 OK` и JSON c `health`.

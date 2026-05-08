@@ -1,4 +1,4 @@
-import { ForbiddenException, Inject, Injectable, UnauthorizedException } from "@nestjs/common";
+import { ForbiddenException, Inject, Injectable, Logger, UnauthorizedException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { JwtService } from "@nestjs/jwt";
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
@@ -22,6 +22,7 @@ type TelegramGetChatMemberResponse = {
   description?: string;
   result?: {
     status?: string;
+    is_member?: boolean;
   };
 };
 
@@ -54,6 +55,7 @@ type RefreshTokenPayload = {
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
   private readonly jwtVerifyOptions: ReturnType<typeof resolveJwtVerifyOptions>;
   private readonly maxTokenChars: number;
 
@@ -119,7 +121,41 @@ export class AuthService {
       throw new UnauthorizedException("TELEGRAM_BOT_TOKEN is not configured for membership verification.");
     }
 
-    let payload: TelegramGetChatMemberResponse | null = null;
+    const attempts = this.parsePositiveIntEnv("TELEGRAM_ACCESS_CHECK_ATTEMPTS", 2);
+    let lastDescription: string | undefined;
+    let lastStatus: string | undefined;
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      const payload = await this.getTelegramChatMember(botToken, accessChatId, telegramUserId);
+      if (!payload.ok) {
+        lastDescription = payload.description;
+      } else {
+        const result = payload.result;
+        const status = result?.status;
+        lastStatus = status;
+        if (this.isAllowedTelegramMemberStatus(status, result?.is_member)) {
+          return {
+            status: status!,
+            isAdmin: status === "creator" || status === "administrator"
+          };
+        }
+      }
+
+      if (attempt < attempts) {
+        await this.sleep(this.parsePositiveIntEnv("TELEGRAM_ACCESS_CHECK_RETRY_DELAY_MS", 250));
+      }
+    }
+
+    this.logger.warn(
+      `Telegram access denied for user ${telegramUserId}: status=${lastStatus ?? "unknown"}, description=${lastDescription ?? "none"}`
+    );
+    throw new ForbiddenException("Mini App access denied: user is not a member of the required Telegram chat.");
+  }
+
+  private async getTelegramChatMember(
+    botToken: string,
+    accessChatId: string,
+    telegramUserId: number
+  ): Promise<TelegramGetChatMemberResponse> {
     try {
       const response = await fetch(`https://api.telegram.org/bot${botToken}/getChatMember`, {
         method: "POST",
@@ -133,32 +169,27 @@ export class AuthService {
       });
 
       if (!response.ok) {
-        throw new ForbiddenException("Telegram membership verification request failed.");
+        return {
+          ok: false,
+          description: `HTTP ${response.status}`
+        };
       }
 
-      payload = (await response.json()) as TelegramGetChatMemberResponse;
-    } catch (error) {
-      if (error instanceof UnauthorizedException || error instanceof ForbiddenException) {
-        throw error;
-      }
+      return (await response.json()) as TelegramGetChatMemberResponse;
+    } catch {
       throw new ForbiddenException("Telegram membership verification is unavailable.");
     }
+  }
 
-    if (!payload?.ok) {
-      throw new ForbiddenException(
-        payload?.description?.trim().length ? `Telegram membership verification failed: ${payload.description}` : "Telegram membership verification failed."
-      );
+  private isAllowedTelegramMemberStatus(status: string | undefined, isRestrictedMember: boolean | undefined): boolean {
+    if (status === "creator" || status === "administrator" || status === "member") {
+      return true;
     }
+    return status === "restricted" && isRestrictedMember === true;
+  }
 
-    const status = payload.result?.status;
-    const allowedStatuses = new Set(["creator", "administrator", "member", "restricted"]);
-    if (!status || !allowedStatuses.has(status)) {
-      throw new ForbiddenException("Mini App access denied: user is not a member of the required Telegram chat.");
-    }
-    return {
-      status,
-      isAdmin: status === "creator" || status === "administrator"
-    };
+  private async sleep(ms: number): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   private async promoteTelegramAdminToLegit(chatId: string, member: ChatMember): Promise<ChatMember> {

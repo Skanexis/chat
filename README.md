@@ -108,8 +108,10 @@ Detailed steps: [docs/POSTGRES_QUICKSTART.md](docs/POSTGRES_QUICKSTART.md)
 
 - Optional strict access control for Telegram Mini App auth:
   - `TELEGRAM_ACCESS_CHAT_ID` (example: `-1001234567890` or `@channel_username`)
+  - `TELEGRAM_ACCESS_CHECK_ATTEMPTS` (default: `2`)
+  - `TELEGRAM_ACCESS_CHECK_RETRY_DELAY_MS` (default: `250`)
 - If set, `POST /v1/auth/telegram` allows login only when Telegram `getChatMember` confirms user membership.
-- Recommended: keep the bot as admin in that target chat for reliable membership checks.
+- `restricted` users are accepted only when Telegram explicitly returns `is_member: true`.
 
 ## Message Retrieval Load Controls
 

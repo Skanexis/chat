@@ -58,6 +58,20 @@ function buildTelegramInitData(input: {
   return params.toString();
 }
 
+function stubTelegramAccessChat(userStatuses: Array<{ status: string; is_member?: boolean }>) {
+  let userStatusIndex = 0;
+  const fetchMock = vi.fn(async () => {
+    const status = userStatuses[Math.min(userStatusIndex, userStatuses.length - 1)];
+    userStatusIndex += 1;
+    return {
+      ok: true,
+      json: async () => ({ ok: true, result: status })
+    } as any;
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
 describe("AuthService Telegram initData validation", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -190,15 +204,7 @@ describe("AuthService Telegram initData validation", () => {
     const { authService, db } = createAuthFixture({
       TELEGRAM_ACCESS_CHAT_ID: "-1001234567890"
     });
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => {
-        return {
-          ok: true,
-          json: async () => ({ ok: true, result: { status: "administrator" } })
-        } as any;
-      })
-    );
+    stubTelegramAccessChat([{ status: "administrator" }]);
 
     const initData = buildTelegramInitData({
       botToken: "test-bot-token",
@@ -220,19 +226,104 @@ describe("AuthService Telegram initData validation", () => {
     expect(role.permissions).toContain("message.delete.own");
   });
 
+  it("allows access from the configured Telegram access chat when bot is administrator", async () => {
+    const { authService } = createAuthFixture({
+      TELEGRAM_ACCESS_CHAT_ID: "-1001234567890",
+      TELEGRAM_ACCESS_CHECK_ATTEMPTS: "1"
+    });
+    const fetchMock = stubTelegramAccessChat([{ status: "member" }]);
+
+    const initData = buildTelegramInitData({
+      botToken: "test-bot-token",
+      authDate: Math.floor(Date.now() / 1000),
+      queryId: "query-access-chat-list-1",
+      user: {
+        id: 700011,
+        username: "single_access_user"
+      }
+    });
+
+    const result = await authService.authWithTelegram({ initData });
+    expect(result.user.telegramId).toBe(700011);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects restricted Telegram users that are not active chat members", async () => {
+    const { authService } = createAuthFixture({
+      TELEGRAM_ACCESS_CHAT_ID: "-1001234567890",
+      TELEGRAM_ACCESS_CHECK_ATTEMPTS: "1"
+    });
+    stubTelegramAccessChat([{ status: "restricted", is_member: false }]);
+
+    const initData = buildTelegramInitData({
+      botToken: "test-bot-token",
+      authDate: Math.floor(Date.now() / 1000),
+      queryId: "query-restricted-left-1",
+      user: {
+        id: 700012,
+        username: "restricted_left"
+      }
+    });
+
+    await expect(authService.authWithTelegram({ initData })).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it("rejects restricted Telegram users without explicit active membership flag", async () => {
+    const { authService } = createAuthFixture({
+      TELEGRAM_ACCESS_CHAT_ID: "-1001234567890",
+      TELEGRAM_ACCESS_CHECK_ATTEMPTS: "1"
+    });
+    stubTelegramAccessChat([{ status: "restricted" }]);
+
+    const initData = buildTelegramInitData({
+      botToken: "test-bot-token",
+      authDate: Math.floor(Date.now() / 1000),
+      queryId: "query-restricted-unknown-1",
+      user: {
+        id: 700014,
+        username: "restricted_unknown"
+      }
+    });
+
+    await expect(authService.authWithTelegram({ initData })).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it("retries Telegram membership checks before denying access", async () => {
+    const { authService } = createAuthFixture({
+      TELEGRAM_ACCESS_CHAT_ID: "-1001234567890",
+      TELEGRAM_ACCESS_CHECK_ATTEMPTS: "2",
+      TELEGRAM_ACCESS_CHECK_RETRY_DELAY_MS: "1"
+    });
+    const fetchMock = vi.fn();
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ ok: true, result: { status: "left" } })
+    } as any);
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ ok: true, result: { status: "member" } })
+    } as any);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const initData = buildTelegramInitData({
+      botToken: "test-bot-token",
+      authDate: Math.floor(Date.now() / 1000),
+      queryId: "query-retry-member-1",
+      user: {
+        id: 700013,
+        username: "retry_member"
+      }
+    });
+
+    await expect(authService.authWithTelegram({ initData })).resolves.toBeDefined();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("does not downgrade existing higher role when Telegram admin logs in", async () => {
     const { authService, db } = createAuthFixture({
       TELEGRAM_ACCESS_CHAT_ID: "-1001234567890"
     });
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => {
-        return {
-          ok: true,
-          json: async () => ({ ok: true, result: { status: "creator" } })
-        } as any;
-      })
-    );
+    stubTelegramAccessChat([{ status: "creator" }]);
 
     const seeded = await db.upsertTelegramUser({
       telegramId: 700008,
