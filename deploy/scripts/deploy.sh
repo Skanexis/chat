@@ -60,10 +60,11 @@ if command -v curl >/dev/null 2>&1; then
 
   WEB_ORIGIN="${NEXT_PUBLIC_API_BASE_URL%%/v1*}"
   if [[ "$WEB_ORIGIN" == http* ]]; then
-    WEB_HEADERS="$(curl -fsSI "$WEB_ORIGIN" || true)"
+    WEB_CHECK_URL="$WEB_ORIGIN/chat/${NEXT_PUBLIC_CHAT_ID:-main}"
+    WEB_HEADERS="$(curl -fsSI "$WEB_CHECK_URL" || true)"
     echo "$WEB_HEADERS"
     if ! printf '%s' "$WEB_HEADERS" | grep -qi "x-source-commit: $SOURCE_COMMIT"; then
-      echo "Warning: public web $WEB_ORIGIN did not return x-source-commit: $SOURCE_COMMIT."
+      echo "Warning: public web $WEB_CHECK_URL did not return x-source-commit: $SOURCE_COMMIT."
       echo "If Telegram still shows old UI, clear WebView cache or verify nginx points at this web container."
     fi
   fi
