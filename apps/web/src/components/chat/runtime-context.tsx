@@ -796,13 +796,27 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
     try {
       return await apiRef.current.createMessage(activeChatId, text, activeSenderMode, identityId, replyToId);
     } catch (sendError) {
-      if (sendError instanceof ApiClientError && sendError.statusCode === 403 && sendError.message.includes("Encrypted-only mode")) {
+      if (shouldRetryAsEncryptedMessage(sendError)) {
         return apiRef.current.createMessage(activeChatId, text, activeSenderMode, identityId, replyToId, {
           encryptedPayload: await encryptMessageText(activeChatId, text)
         });
       }
       throw sendError;
     }
+  }
+
+  function shouldRetryAsEncryptedMessage(error: unknown): boolean {
+    if (!(error instanceof ApiClientError) || error.statusCode !== 403) {
+      return false;
+    }
+
+    const message = error.message.toLowerCase();
+    return (
+      message.includes("encrypted-only mode") ||
+      message.includes("plain text/media messages are not allowed") ||
+      message.includes("plain text") ||
+      message.includes("plain media")
+    );
   }
 
   function onTyping(): void {
