@@ -96,15 +96,15 @@ function resolveAuthorLabel(message: Pick<ChatMessage, "authorId" | "displayAuth
 
 function getMessagePreview(message: UiMessage | ChatMessage): string {
   if (message.isDeleted) return "[deleted]";
-  if (message.isEncrypted) return "[encrypted payload]";
   if (message.text && message.text.trim().length > 0) return message.text;
+  if (message.isEncrypted) return "[encrypted payload]";
   if (message.media) return `[${message.media.type}] ${message.media.url}`;
   return "[empty message]";
 }
 
 function getDeletedMessageOriginalPreview(message: UiMessage | ChatMessage): string {
-  if (message.isEncrypted) return "[encrypted payload]";
   if (message.text && message.text.trim().length > 0) return message.text;
+  if (message.isEncrypted) return "[encrypted payload]";
   if (message.media) return `[${message.media.type}] ${message.media.url}`;
   return "[empty message]";
 }

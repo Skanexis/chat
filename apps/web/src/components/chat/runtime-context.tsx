@@ -5,6 +5,7 @@ import { type FormEvent, createContext, useCallback, useContext, useEffect, useM
 import { type SenderModeValue } from "@/design-system";
 import { ApiClient, ApiClientError } from "@/lib/api-client";
 import { appConfig } from "@/lib/config";
+import { decryptMessageText, encryptMessageText } from "@/lib/e2e";
 import { clearSession, loadSession } from "@/lib/session";
 import { getTelegramInitData, getTelegramInitDataUserId, initTelegramViewport } from "@/lib/telegram";
 import type {
@@ -314,7 +315,7 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
         if (!alive) {
           return;
         }
-        applyBootstrap(bootstrap);
+        await applyBootstrap(bootstrap);
         setMaintenanceState(incidentMode.enabled ? incidentMode.state : null);
 
         socketRef.current?.disconnect();
@@ -367,8 +368,7 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
             setError({ message: "WS reconnect failed. Tap reload to restore live updates." });
           },
           onSnapshot: (payload) => {
-            setChat(payload.chat);
-            setMessages(payload.messages.map((message) => ({ ...message })));
+            void applySnapshot(payload);
             setWsStatus("online");
             setWsReconnectAttempt(null);
             setWsReconnectStartedAt(null);
@@ -376,17 +376,17 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
           onMessageCreated: (message) => {
             markWsEvent();
             invalidate("webhooks");
-            setMessages((prev) => mergeMessage(prev, message));
+            void mergeIncomingMessage(message);
           },
           onMessageUpdated: (message) => {
             markWsEvent();
             invalidate("webhooks");
-            setMessages((prev) => mergeMessage(prev, message));
+            void mergeIncomingMessage(message);
           },
           onMessageDeleted: (message) => {
             markWsEvent();
             invalidate("webhooks");
-            setMessages((prev) => mergeMessage(prev, message));
+            void mergeIncomingMessage(message);
           },
           onMessagesPurged: (payload) => {
             markWsEvent();
@@ -598,10 +598,32 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
             ? "Realtime connection is restoring. Sending works, but live updates can be delayed."
             : null;
 
-  function applyBootstrap(bootstrap: BootstrapResponse): void {
+  async function applyBootstrap(bootstrap: BootstrapResponse): Promise<void> {
     setChat(bootstrap.chat);
-    setMessages(bootstrap.messages.map((message) => ({ ...message })));
+    setMessages(await hydrateMessages(bootstrap.messages));
     setIdentities(bootstrap.identities);
+  }
+
+  async function applySnapshot(payload: { chat: ChatView; messages: ChatMessage[] }): Promise<void> {
+    setChat(payload.chat);
+    setMessages(await hydrateMessages(payload.messages));
+  }
+
+  async function mergeIncomingMessage(message: ChatMessage): Promise<void> {
+    const hydrated = await hydrateMessage(message);
+    setMessages((prev) => mergeMessage(prev, hydrated));
+  }
+
+  async function hydrateMessages(items: ChatMessage[]): Promise<UiMessage[]> {
+    return Promise.all(items.map((message) => hydrateMessage(message)));
+  }
+
+  async function hydrateMessage(message: ChatMessage): Promise<UiMessage> {
+    if (!message.isEncrypted) {
+      return { ...message };
+    }
+    const decryptedText = await decryptMessageText(chatId, message);
+    return decryptedText === null ? { ...message } : { ...message, text: decryptedText };
   }
 
   function resolveIdentityId(): string | undefined {
@@ -681,10 +703,14 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
     setMessages((prev) => mergeMessage(prev, optimistic));
 
     try {
-      const created = await apiRef.current.createMessage(chat.id, text, senderMode, identityId, replyToId);
+      const encryptedPayload = appConfig.encryptedMessages ? await encryptMessageText(chat.id, text) : undefined;
+      const created = await apiRef.current.createMessage(chat.id, text, senderMode, identityId, replyToId, {
+        encryptedPayload
+      });
+      const hydratedCreated = await hydrateMessage(created);
       setMessages((prev) => {
         const withoutTemp = prev.filter((entry) => entry.id !== tempId);
-        return mergeMessage(withoutTemp, created);
+        return mergeMessage(withoutTemp, hydratedCreated);
       });
       setReplyToMessageId(null);
       setError(null);

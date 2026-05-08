@@ -29,6 +29,8 @@ pnpm build:web
 Frontend envs (`apps/web/.env.example`):
 - `NEXT_PUBLIC_API_BASE_URL` (default: `http://localhost:3000/v1`)
 - `NEXT_PUBLIC_CHAT_ID` (default: `main`)
+- `NEXT_PUBLIC_CHAT_ENCRYPTED_MESSAGES=true|false` (enable browser AES-GCM payloads for encrypted-only API mode)
+- `NEXT_PUBLIC_CHAT_ENCRYPTION_KEY` (shared browser-side key material for encrypted message display)
 - `NEXT_PUBLIC_DEV_INIT_DATA` (dev fallback when Telegram WebApp `initData` is absent)
 
 Production deploy guide (Git + VPS + Docker + Nginx + SSL):
@@ -92,6 +94,7 @@ Detailed steps: [docs/POSTGRES_QUICKSTART.md](docs/POSTGRES_QUICKSTART.md)
   - encrypted payload: `encrypted_payload`
 - `encrypted_payload` and `text/media` are mutually exclusive.
 - Server stores ciphertext envelope only (`isEncrypted`, `encryptedPayload`) and does not decrypt message content.
+- Frontend can send/read browser-encrypted AES-GCM payloads when `NEXT_PUBLIC_CHAT_ENCRYPTED_MESSAGES=true`; all clients must be built with the same `NEXT_PUBLIC_CHAT_ENCRYPTION_KEY` to display messages.
 - Encrypted messages are immutable via `PATCH /v1/chats/:chatId/messages/:messageId` (edit rejected).
 - Device key-bundle endpoints:
   - `POST /v1/chats/:chatId/e2e/devices`

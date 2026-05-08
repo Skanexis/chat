@@ -1,4 +1,5 @@
 import { appConfig } from "@/lib/config";
+import type { EncryptedMessagePayloadInput } from "@/lib/e2e";
 import { clearSession, saveSession } from "@/lib/session";
 import type {
   ApiErrorPayload,
@@ -150,18 +151,26 @@ export class ApiClient {
     text: string,
     senderMode: "as_user" | "as_group" | "as_role_profile" = "as_user",
     identityId?: string,
-    replyToId?: string
+    replyToId?: string,
+    options: {
+      encryptedPayload?: EncryptedMessagePayloadInput;
+    } = {}
   ): Promise<ChatMessage> {
     const body: {
-      text: string;
+      text?: string;
+      encrypted_payload?: EncryptedMessagePayloadInput;
       sender_mode: "as_user" | "as_group" | "as_role_profile";
       identity_id?: string;
       reply_to_id?: string;
     } = {
-      text,
       sender_mode: senderMode
     };
 
+    if (options.encryptedPayload) {
+      body.encrypted_payload = options.encryptedPayload;
+    } else {
+      body.text = text;
+    }
     if (identityId) {
       body.identity_id = identityId;
     }
