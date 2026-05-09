@@ -233,7 +233,61 @@ curl -sS https://chat.ristoranti-d-italia.com/v1/health
 
 Должно вернуться `200 OK` и JSON c `health`.
 
-## 10) Релиз обновлений
+## 10) Включить watchdog для зависших контейнеров
+
+Docker `restart: unless-stopped` перезапускает контейнер, если процесс завершился, но не лечит случай,
+когда контейнер продолжает работать и становится `unhealthy`. Для прод-сервера включите systemd timer,
+который проверяет `api` и `web` раз в минуту и перезапускает их при плохом состоянии.
+
+На сервере:
+
+```bash
+cd /opt/phantom-lab-chat
+chmod +x deploy/scripts/health-watchdog.sh
+sudo cp deploy/systemd/phantom-lab-health-watchdog.service /etc/systemd/system/
+sudo cp deploy/systemd/phantom-lab-health-watchdog.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now phantom-lab-health-watchdog.timer
+```
+
+Проверка:
+
+```bash
+systemctl list-timers phantom-lab-health-watchdog.timer
+sudo systemctl status phantom-lab-health-watchdog.timer
+sudo journalctl -u phantom-lab-health-watchdog.service -n 50 --no-pager
+```
+
+Ручной запуск проверки:
+
+```bash
+sudo systemctl start phantom-lab-health-watchdog.service
+```
+
+## 11) Быстрая диагностика инцидента
+
+Если ночью снова будет `Network error`, сначала снимите состояние и события до ручного рестарта:
+
+```bash
+cd /opt/phantom-lab-chat
+docker compose -f deploy/docker-compose.prod.yml ps
+docker compose -f deploy/docker-compose.prod.yml logs --since 24h --tail 500 api web postgres redis
+docker compose -f deploy/docker-compose.prod.yml events --since 24h
+docker inspect -f '{{.Name}} restart={{.RestartCount}} oom={{.State.OOMKilled}} status={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} started={{.State.StartedAt}} finished={{.State.FinishedAt}}' \
+  $(docker compose -f deploy/docker-compose.prod.yml ps -q api web postgres redis)
+sudo journalctl -u docker --since "24 hours ago" --no-pager
+sudo journalctl -u nginx --since "24 hours ago" --no-pager
+```
+
+После этого можно перезапустить web/API:
+
+```bash
+docker compose -f deploy/docker-compose.prod.yml restart api web
+docker compose -f deploy/docker-compose.prod.yml ps
+curl -fsS https://chat.ristoranti-d-italia.com/v1/health
+```
+
+## 12) Релиз обновлений
 
 Каждый следующий релиз:
 
@@ -250,7 +304,7 @@ git pull --ff-only origin main
 - `up -d --remove-orphans`
 - Prisma миграции автоматически в `api` контейнере при старте
 
-## 11) Быстрый откат
+## 13) Быстрый откат
 
 Откат к предыдущему коммиту:
 
@@ -269,7 +323,7 @@ git pull --ff-only origin main
 ./deploy/scripts/deploy.sh
 ```
 
-## 12) Бэкап и восстановление PostgreSQL
+## 14) Бэкап и восстановление PostgreSQL
 
 Бэкап:
 
@@ -287,7 +341,7 @@ cat backups/your_backup.sql | docker compose -f deploy/docker-compose.prod.yml e
   psql -U phantom -d phantom_lab_chat
 ```
 
-## 13) Что важно по безопасности
+## 15) Что важно по безопасности
 
 - Не храните реальные `.env` в Git.
 - `JWT_SECRET` и `POSTGRES_PASSWORD` должны быть длинными случайными строками.
