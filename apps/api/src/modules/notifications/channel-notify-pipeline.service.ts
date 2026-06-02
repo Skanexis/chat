@@ -12,6 +12,7 @@ import { TelegramBotService } from "./telegram-bot.service.js";
 export class ChannelNotifyPipelineService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(ChannelNotifyPipelineService.name);
   private detachMessageListener?: () => void;
+  private detachPurgeListener?: () => void;
   private readonly digestBuffers = new Map<string, Message[]>();
   private readonly digestTimers = new Map<string, NodeJS.Timeout>();
   private readonly redactMessageContentInNotify: boolean;
@@ -30,10 +31,14 @@ export class ChannelNotifyPipelineService implements OnModuleInit, OnModuleDestr
     this.detachMessageListener = this.eventBus.on("message.created", (message) => {
       void this.handleMessageCreated(message);
     });
+    this.detachPurgeListener = this.eventBus.on("message.purged", (payload) => {
+      this.removePurgedMessagesFromDigest(payload.chatId, payload.messageIds);
+    });
   }
 
   onModuleDestroy(): void {
     this.detachMessageListener?.();
+    this.detachPurgeListener?.();
     for (const timer of this.digestTimers.values()) {
       clearTimeout(timer);
     }
@@ -73,6 +78,20 @@ export class ChannelNotifyPipelineService implements OnModuleInit, OnModuleDestr
       void this.flushDigest(message.chatId);
     }, delay);
     this.digestTimers.set(message.chatId, timer);
+  }
+
+  private removePurgedMessagesFromDigest(chatId: string, messageIds: string[]): void {
+    const current = this.digestBuffers.get(chatId);
+    if (!current || current.length === 0) {
+      return;
+    }
+    const purgedIds = new Set(messageIds);
+    const retained = current.filter((message) => !purgedIds.has(message.id));
+    if (retained.length === 0) {
+      this.digestBuffers.delete(chatId);
+      return;
+    }
+    this.digestBuffers.set(chatId, retained);
   }
 
   private async flushDigest(chatId: string): Promise<void> {

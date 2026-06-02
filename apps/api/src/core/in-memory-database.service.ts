@@ -7,6 +7,7 @@ import type {
   ChannelNotifyPatch,
   CountAuditOptions,
   DatabaseService,
+  DeletedMessagesBatch,
   BroadcastCampaignPatch,
   KeywordAlertPatch,
   IntegrationWebhookPatch,
@@ -604,8 +605,80 @@ export class InMemoryDatabase implements DatabaseService {
         this.threadSubscriptions.delete(subscriptionId);
       }
     }
+    for (const [scheduledMessageId, scheduledMessage] of this.scheduledMessages.entries()) {
+      if (scheduledMessage.chatId === chatId && scheduledMessage.sentMessageId && messageIdSet.has(scheduledMessage.sentMessageId)) {
+        this.scheduledMessages.delete(scheduledMessageId);
+      }
+    }
+    for (const [auditId, audit] of this.audits.entries()) {
+      if (audit.chatId === chatId && audit.targetType === "message" && messageIdSet.has(audit.targetId)) {
+        this.audits.delete(auditId);
+      }
+    }
 
     return messageIds;
+  }
+
+  async hardDeleteMessagesOlderThan(cutoffIso: string): Promise<DeletedMessagesBatch[]> {
+    const messageEntries = Array.from(this.messages.values()).filter((message) => message.createdAt <= cutoffIso);
+    if (messageEntries.length === 0) {
+      return [];
+    }
+
+    const messageIdSet = new Set(messageEntries.map((message) => message.id));
+    const batchesByChatId = new Map<string, string[]>();
+    for (const message of messageEntries) {
+      this.messages.delete(message.id);
+      const current = batchesByChatId.get(message.chatId) ?? [];
+      current.push(message.id);
+      batchesByChatId.set(message.chatId, current);
+    }
+
+    for (const [reactionId, reaction] of this.reactions.entries()) {
+      if (messageIdSet.has(reaction.messageId)) {
+        this.reactions.delete(reactionId);
+      }
+    }
+    for (const [translationId, translation] of this.messageTranslations.entries()) {
+      if (messageIdSet.has(translation.messageId)) {
+        this.messageTranslations.delete(translationId);
+      }
+    }
+    for (const [readReceiptId, readReceipt] of this.readReceipts.entries()) {
+      if (messageIdSet.has(readReceipt.messageId)) {
+        this.readReceipts.delete(readReceiptId);
+      }
+    }
+    for (const [bookmarkId, bookmark] of this.bookmarks.entries()) {
+      if (messageIdSet.has(bookmark.messageId)) {
+        this.bookmarks.delete(bookmarkId);
+      }
+    }
+    for (const [reminderId, reminder] of this.reminders.entries()) {
+      if (messageIdSet.has(reminder.messageId)) {
+        this.reminders.delete(reminderId);
+      }
+    }
+    for (const [subscriptionId, subscription] of this.threadSubscriptions.entries()) {
+      if (messageIdSet.has(subscription.messageId)) {
+        this.threadSubscriptions.delete(subscriptionId);
+      }
+    }
+    for (const [scheduledMessageId, scheduledMessage] of this.scheduledMessages.entries()) {
+      if (scheduledMessage.sentMessageId && messageIdSet.has(scheduledMessage.sentMessageId)) {
+        this.scheduledMessages.delete(scheduledMessageId);
+      }
+    }
+    for (const [auditId, audit] of this.audits.entries()) {
+      if (audit.targetType === "message" && messageIdSet.has(audit.targetId)) {
+        this.audits.delete(auditId);
+      }
+    }
+
+    return Array.from(batchesByChatId.entries()).map(([batchChatId, messageIds]) => ({
+      chatId: batchChatId,
+      messageIds
+    }));
   }
 
   async listMessageReactions(chatId: string, messageId: string): Promise<MessageReaction[]> {

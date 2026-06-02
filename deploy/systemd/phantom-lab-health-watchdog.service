@@ -9,5 +9,5 @@ User=deploy
 Group=docker
 WorkingDirectory=/opt/phantom-lab-chat
 Environment=PHANTOM_LAB_ROOT=/opt/phantom-lab-chat
-Environment=PHANTOM_LAB_WATCHDOG_SERVICES=api web
+Environment="PHANTOM_LAB_WATCHDOG_SERVICES=api web"
 ExecStart=/opt/phantom-lab-chat/deploy/scripts/health-watchdog.sh

@@ -169,6 +169,7 @@ nano deploy/env/web.env
   - `JWT_SECRET` (строка 32+ символа)
   - `TELEGRAM_BOT_TOKEN` (реальный токен бота)
   - `API_CORS_ORIGINS` и `WS_CORS_ORIGINS` (ваш домен)
+  - `MESSAGE_RETENTION_ENABLED=true`, `MESSAGE_RETENTION_HOURS=36` для автоудаления сообщений старше 36 часов
 - `deploy/env/web.env`
   - `NEXT_PUBLIC_API_BASE_URL=https://chat.example.com/v1`
 

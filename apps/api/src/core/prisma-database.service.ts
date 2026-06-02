@@ -29,6 +29,7 @@ import type {
   ChannelNotifyPatch,
   CountAuditOptions,
   DatabaseService,
+  DeletedMessagesBatch,
   KeywordAlertPatch,
   IntegrationWebhookPatch,
   KnowledgeArticlePatch,
@@ -800,12 +801,88 @@ export class PrismaDatabaseService implements DatabaseService {
           messageId: { in: messageIds }
         }
       });
+      await tx.scheduledMessage.deleteMany({
+        where: {
+          chatId,
+          sentMessageId: { in: messageIds }
+        }
+      });
+      await tx.auditLog.deleteMany({
+        where: {
+          chatId,
+          targetType: "message",
+          targetId: { in: messageIds }
+        }
+      });
       await tx.message.deleteMany({
         where: { chatId }
       });
     });
 
     return messageIds;
+  }
+
+  async hardDeleteMessagesOlderThan(cutoffIso: string): Promise<DeletedMessagesBatch[]> {
+    await this.ensureSeeded();
+    const messages = await this.prisma.message.findMany({
+      where: {
+        createdAt: { lte: new Date(cutoffIso) }
+      },
+      select: {
+        id: true,
+        chatId: true
+      }
+    });
+    if (messages.length === 0) {
+      return [];
+    }
+
+    const messageIds = messages.map((message) => message.id);
+    const batchesByChatId = new Map<string, string[]>();
+    for (const message of messages) {
+      const current = batchesByChatId.get(message.chatId) ?? [];
+      current.push(message.id);
+      batchesByChatId.set(message.chatId, current);
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.reminder.deleteMany({
+        where: {
+          messageId: { in: messageIds }
+        }
+      });
+      await tx.bookmark.deleteMany({
+        where: {
+          messageId: { in: messageIds }
+        }
+      });
+      await tx.threadSubscription.deleteMany({
+        where: {
+          messageId: { in: messageIds }
+        }
+      });
+      await tx.scheduledMessage.deleteMany({
+        where: {
+          sentMessageId: { in: messageIds }
+        }
+      });
+      await tx.auditLog.deleteMany({
+        where: {
+          targetType: "message",
+          targetId: { in: messageIds }
+        }
+      });
+      await tx.message.deleteMany({
+        where: {
+          id: { in: messageIds }
+        }
+      });
+    });
+
+    return Array.from(batchesByChatId.entries()).map(([batchChatId, batchMessageIds]) => ({
+      chatId: batchChatId,
+      messageIds: batchMessageIds
+    }));
   }
 
   async listMessageReactions(chatId: string, messageId: string): Promise<MessageReaction[]> {

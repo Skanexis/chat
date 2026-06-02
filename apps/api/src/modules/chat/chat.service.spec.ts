@@ -5,9 +5,10 @@ import { describe, expect, it } from "vitest";
 import { EventBusService } from "../../core/event-bus.service.js";
 import { InMemoryDatabase } from "../../core/in-memory-database.service.js";
 import { PolicyService } from "../../core/policy.service.js";
-import type { RequestUser } from "../../core/types.js";
+import type { Message, RequestUser } from "../../core/types.js";
 import { ChatAntiAbuseService } from "./chat-anti-abuse.service.js";
 import { ChatService } from "./chat.service.js";
+import { MessageRetentionService } from "./message-retention.service.js";
 
 async function makeRequestUser(db: InMemoryDatabase, telegramId: number, username: string): Promise<RequestUser> {
   const user = await db.upsertTelegramUser({ telegramId, username });
@@ -148,6 +149,55 @@ describe("ChatService message permission matrix", () => {
 
     const all = await db.listMessages("main", { includeDeleted: true });
     expect(all.filter((message) => !message.isDeleted).length).toBe(1);
+  });
+
+  it("hard deletes messages older than the retention window", async () => {
+    const { db, chatService } = createChatServiceFixture();
+    const user = await makeRequestUser(db, 501008, "retention_member");
+    const senderRole = await db.createRole({
+      chatId: "main",
+      name: "retention_sender",
+      priority: 6000,
+      permissions: ["chat.view", "message.send.text"],
+      isDefault: false
+    });
+    await db.updateMemberRole("main", user.userId, senderRole.id);
+    const oldMessage = await chatService.createMessage("main", user, {
+      sender_mode: "as_user",
+      text: "old message"
+    });
+    const recentMessage = await chatService.createMessage("main", user, {
+      sender_mode: "as_user",
+      text: "recent message"
+    });
+
+    const oldCreatedAt = new Date(Date.parse("2026-06-01T00:00:00.000Z")).toISOString();
+    const rawDb = db as unknown as { messages: Map<string, Message> };
+    rawDb.messages.set(oldMessage.id, {
+      ...(rawDb.messages.get(oldMessage.id) as Message),
+      createdAt: oldCreatedAt
+    });
+
+    const purgedEvents: string[][] = [];
+    const eventBus = new EventBusService();
+    const off = eventBus.on("message.purged", (payload) => purgedEvents.push(payload.messageIds));
+    const retention = new MessageRetentionService(
+      db,
+      eventBus,
+      new ConfigService({
+        MESSAGE_RETENTION_ENABLED: "true",
+        MESSAGE_RETENTION_HOURS: "36",
+        MESSAGE_RETENTION_SWEEP_INTERVAL_SECONDS: "3600"
+      })
+    );
+
+    await expect(retention.sweepExpiredMessages(new Date("2026-06-02T13:00:00.000Z"))).resolves.toBe(1);
+    off();
+
+    const all = await db.listMessages("main", { includeDeleted: true });
+    expect(all.map((message) => message.id)).toEqual([recentMessage.id]);
+    expect(purgedEvents).toEqual([[oldMessage.id]]);
+    expect((await db.listAudit("main")).some((entry) => entry.targetType === "message" && entry.targetId === oldMessage.id)).toBe(false);
   });
 
   it("denies media and as_group for default member role", async () => {

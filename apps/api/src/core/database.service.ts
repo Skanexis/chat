@@ -137,6 +137,10 @@ export type CountAuditOptions = {
   targetId?: string;
   since?: string;
 };
+export type DeletedMessagesBatch = {
+  chatId: string;
+  messageIds: string[];
+};
 
 export interface DatabaseService {
   upsertTelegramUser(input: { telegramId: number; username?: string; firstName?: string; lastName?: string }): Promise<User>;
@@ -183,6 +187,7 @@ export interface DatabaseService {
   updateMessage(chatId: string, messageId: string, patch: MessagePatch): Promise<Message>;
   softDeleteMessage(chatId: string, messageId: string): Promise<Message>;
   hardDeleteMessages(chatId: string): Promise<string[]>;
+  hardDeleteMessagesOlderThan(cutoffIso: string): Promise<DeletedMessagesBatch[]>;
   listMessageReactions(chatId: string, messageId: string): Promise<MessageReaction[]>;
   upsertMessageReaction(chatId: string, messageId: string, userId: string, reaction: string): Promise<MessageReaction>;
   deleteMessageReaction(chatId: string, messageId: string, userId: string): Promise<void>;

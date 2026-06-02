@@ -308,9 +308,7 @@ export class ChatService {
       payload: {
         deletedAuthorId: message.authorId,
         deletedDisplayAuthorId: message.displayAuthorId,
-        deletedText: message.isEncrypted ? null : (message.text ?? null),
-        deletedMediaType: message.media?.type ?? null,
-        deletedMediaUrl: message.media?.url ?? null,
+        deletedContentStored: false,
         deletedCreatedAt: message.createdAt
       }
     });
