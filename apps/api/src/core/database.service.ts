@@ -186,6 +186,7 @@ export interface DatabaseService {
   createMessage(message: Omit<Message, "id" | "createdAt" | "updatedAt" | "isDeleted">): Promise<Message>;
   updateMessage(chatId: string, messageId: string, patch: MessagePatch): Promise<Message>;
   softDeleteMessage(chatId: string, messageId: string): Promise<Message>;
+  hardDeleteMessage(chatId: string, messageId: string): Promise<void>;
   hardDeleteMessages(chatId: string): Promise<string[]>;
   hardDeleteMessagesOlderThan(cutoffIso: string): Promise<DeletedMessagesBatch[]>;
   listMessageReactions(chatId: string, messageId: string): Promise<MessageReaction[]>;

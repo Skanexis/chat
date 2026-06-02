@@ -62,8 +62,10 @@ function createFixture(configOverrides?: Record<string, unknown>) {
       text: "edited"
     })),
     deleteMessage: vi.fn(async () => ({
-      id: "msg-1",
-      isDeleted: true
+      ok: true,
+      chatId: "main",
+      messageId: "msg-1",
+      purged: true
     })),
     setMessageReaction: vi.fn(async () => ({
       ok: true

@@ -66,7 +66,8 @@ describe("ChatService message permission matrix", () => {
     ).rejects.toBeInstanceOf(ForbiddenException);
 
     await expect(chatService.deleteMessage("main", created.id, userB)).rejects.toBeInstanceOf(ForbiddenException);
-    await expect(chatService.deleteMessage("main", created.id, userA)).resolves.toMatchObject({ isDeleted: true });
+    await expect(chatService.deleteMessage("main", created.id, userA)).resolves.toMatchObject({ purged: true, messageId: created.id });
+    await expect(db.getMessage("main", created.id)).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it("allows owner wildcard role to purge chat via /purge command alias", async () => {

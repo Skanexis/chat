@@ -15,7 +15,7 @@ import type { Server, Socket } from "socket.io";
 
 import { EventBusService } from "../../core/event-bus.service.js";
 import { resolveJwtTokenMaxChars, resolveJwtVerifyOptions } from "../../core/jwt-config.js";
-import type { RequestUser } from "../../core/types.js";
+import type { Message, RequestUser } from "../../core/types.js";
 import { ChatService } from "../chat/chat.service.js";
 import type { CreateMessageDto, SetMessageReactionDto, UpdateMessageDto } from "../chat/chat.dto.js";
 
@@ -294,7 +294,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
   private async broadcastMessageEventForRoom(
     eventName: "message.created" | "message.updated" | "message.deleted",
-    payload: Awaited<ReturnType<ChatService["deleteMessage"]>>
+    payload: Message
   ): Promise<void> {
     const roomId = `chat:${payload.chatId}`;
     const room = this.server.sockets.adapter.rooms.get(roomId);

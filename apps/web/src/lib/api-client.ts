@@ -195,11 +195,14 @@ export class ApiClient {
     });
   }
 
-  async deleteMessage(chatId: string, messageId: string): Promise<ChatMessage> {
-    return this.request<ChatMessage>(`/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(messageId)}`, {
-      method: "DELETE",
-      retryMode: "network_once"
-    });
+  async deleteMessage(chatId: string, messageId: string): Promise<{ ok: true; chatId: string; messageId: string; purged: true }> {
+    return this.request<{ ok: true; chatId: string; messageId: string; purged: true }>(
+      `/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(messageId)}`,
+      {
+        method: "DELETE",
+        retryMode: "network_once"
+      }
+    );
   }
 
   async setReaction(

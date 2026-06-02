@@ -771,6 +771,51 @@ export class PrismaDatabaseService implements DatabaseService {
     return this.mapMessage(deleted);
   }
 
+  async hardDeleteMessage(chatId: string, messageId: string): Promise<void> {
+    await this.ensureSeeded();
+    const existing = await this.prisma.message.findUnique({ where: { id: messageId } });
+    if (!existing || existing.chatId !== chatId) {
+      throw new NotFoundException(`Message ${messageId} not found.`);
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.reminder.deleteMany({
+        where: {
+          chatId,
+          messageId
+        }
+      });
+      await tx.bookmark.deleteMany({
+        where: {
+          chatId,
+          messageId
+        }
+      });
+      await tx.threadSubscription.deleteMany({
+        where: {
+          chatId,
+          messageId
+        }
+      });
+      await tx.scheduledMessage.deleteMany({
+        where: {
+          chatId,
+          sentMessageId: messageId
+        }
+      });
+      await tx.auditLog.deleteMany({
+        where: {
+          chatId,
+          targetType: "message",
+          targetId: messageId
+        }
+      });
+      await tx.message.delete({
+        where: { id: messageId }
+      });
+    });
+  }
+
   async hardDeleteMessages(chatId: string): Promise<string[]> {
     await this.ensureSeeded();
     const messages = await this.prisma.message.findMany({

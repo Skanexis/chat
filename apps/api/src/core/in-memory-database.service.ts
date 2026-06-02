@@ -562,6 +562,53 @@ export class InMemoryDatabase implements DatabaseService {
     return updated;
   }
 
+  async hardDeleteMessage(chatId: string, messageId: string): Promise<void> {
+    await this.getMessage(chatId, messageId);
+    const messageIdSet = new Set([messageId]);
+    this.messages.delete(messageId);
+
+    for (const [reactionId, reaction] of this.reactions.entries()) {
+      if (reaction.chatId === chatId && messageIdSet.has(reaction.messageId)) {
+        this.reactions.delete(reactionId);
+      }
+    }
+    for (const [translationId, translation] of this.messageTranslations.entries()) {
+      if (translation.chatId === chatId && messageIdSet.has(translation.messageId)) {
+        this.messageTranslations.delete(translationId);
+      }
+    }
+    for (const [readReceiptId, readReceipt] of this.readReceipts.entries()) {
+      if (readReceipt.chatId === chatId && messageIdSet.has(readReceipt.messageId)) {
+        this.readReceipts.delete(readReceiptId);
+      }
+    }
+    for (const [bookmarkId, bookmark] of this.bookmarks.entries()) {
+      if (bookmark.chatId === chatId && messageIdSet.has(bookmark.messageId)) {
+        this.bookmarks.delete(bookmarkId);
+      }
+    }
+    for (const [reminderId, reminder] of this.reminders.entries()) {
+      if (reminder.chatId === chatId && messageIdSet.has(reminder.messageId)) {
+        this.reminders.delete(reminderId);
+      }
+    }
+    for (const [subscriptionId, subscription] of this.threadSubscriptions.entries()) {
+      if (subscription.chatId === chatId && messageIdSet.has(subscription.messageId)) {
+        this.threadSubscriptions.delete(subscriptionId);
+      }
+    }
+    for (const [scheduledMessageId, scheduledMessage] of this.scheduledMessages.entries()) {
+      if (scheduledMessage.chatId === chatId && scheduledMessage.sentMessageId && messageIdSet.has(scheduledMessage.sentMessageId)) {
+        this.scheduledMessages.delete(scheduledMessageId);
+      }
+    }
+    for (const [auditId, audit] of this.audits.entries()) {
+      if (audit.chatId === chatId && audit.targetType === "message" && messageIdSet.has(audit.targetId)) {
+        this.audits.delete(auditId);
+      }
+    }
+  }
+
   async hardDeleteMessages(chatId: string): Promise<string[]> {
     const messageIds = Array.from(this.messages.values())
       .filter((message) => message.chatId === chatId)

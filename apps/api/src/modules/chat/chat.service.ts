@@ -292,29 +292,39 @@ export class ChatService {
     return enriched;
   }
 
-  async deleteMessage(chatId: string, messageId: string, requestUser: RequestUser): Promise<MessageView> {
+  async deleteMessage(
+    chatId: string,
+    messageId: string,
+    requestUser: RequestUser
+  ): Promise<{ ok: true; chatId: string; messageId: string; purged: true }> {
     const member = await this.db.ensureMember(chatId, requestUser.userId);
     this.policy.assertMemberCanAccess(member);
     const message = await this.db.getMessage(chatId, messageId);
     await this.ensureCanDelete(chatId, member, message, requestUser.userId);
 
-    const deleted = await this.db.softDeleteMessage(chatId, messageId);
+    await this.db.hardDeleteMessage(chatId, messageId);
     await this.db.addAuditLog({
       chatId,
       actorId: requestUser.userId,
       action: "message.delete",
-      targetType: "message",
-      targetId: messageId,
+      targetType: "chat",
+      targetId: chatId,
       payload: {
-        deletedAuthorId: message.authorId,
-        deletedDisplayAuthorId: message.displayAuthorId,
+        deletedCount: 1,
         deletedContentStored: false,
         deletedCreatedAt: message.createdAt
       }
     });
-    const enriched = await this.enrichMessageWithAuthorInfo(chatId, deleted);
-    this.eventBus.emit("message.deleted", enriched);
-    return this.sanitizeDeletedMessageForMember(chatId, member, enriched);
+    this.eventBus.emit("message.purged", {
+      chatId,
+      messageIds: [messageId]
+    });
+    return {
+      ok: true,
+      chatId,
+      messageId,
+      purged: true
+    };
   }
 
   async pinMessage(chatId: string, messageId: string, requestUser: RequestUser): Promise<{ ok: true; messageId: string; pinnedAt: string }> {

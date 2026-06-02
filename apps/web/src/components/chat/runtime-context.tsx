@@ -739,8 +739,8 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
     if (!chat) return;
 
     try {
-      const deleted = await apiRef.current.deleteMessage(chat.id, messageId);
-      setMessages((prev) => mergeMessage(prev, deleted));
+      await apiRef.current.deleteMessage(chat.id, messageId);
+      setMessages((prev) => prev.filter((message) => message.id !== messageId));
       setError(null);
     } catch (deleteError) {
       setError(parseError(deleteError));
