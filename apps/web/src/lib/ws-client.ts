@@ -53,10 +53,11 @@ export function connectChatSocket(apiBaseUrl: string, token: string, chatId: str
     path: "/ws/socket.io",
     transports: ["websocket", "polling"],
     reconnection: true,
-    reconnectionDelay: 800,
-    reconnectionDelayMax: 5000,
-    randomizationFactor: 0.5,
-    timeout: 10000,
+    reconnectionAttempts: Infinity,
+    reconnectionDelay: 600,
+    reconnectionDelayMax: 8000,
+    randomizationFactor: 0.35,
+    timeout: 15000,
     auth: {
       token
     }
@@ -68,7 +69,7 @@ export function connectChatSocket(apiBaseUrl: string, token: string, chatId: str
     if (hasNavigator && navigator.onLine === false) {
       return;
     }
-    if (!socket.connected) {
+    if (!socket.connected && socket.disconnected) {
       socket.connect();
     }
   };
@@ -79,15 +80,25 @@ export function connectChatSocket(apiBaseUrl: string, token: string, chatId: str
   const handleOffline = (): void => {
     callbacks.onDisconnected?.("network offline");
   };
+  const handleVisibilityChange = (): void => {
+    if (document.visibilityState === "visible") {
+      forceReconnect();
+    }
+  };
+  const handleFocus = (): void => {
+    forceReconnect();
+  };
 
   if (hasWindow) {
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", handleOffline);
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
   }
 
   const reconnectHealthTimer = setInterval(() => {
     forceReconnect();
-  }, 5000);
+  }, 12000);
 
   socket.on("connect", () => {
     callbacks.onConnected?.();
@@ -134,6 +145,8 @@ export function connectChatSocket(apiBaseUrl: string, token: string, chatId: str
       if (hasWindow) {
         window.removeEventListener("online", handleOnline);
         window.removeEventListener("offline", handleOffline);
+        window.removeEventListener("focus", handleFocus);
+        document.removeEventListener("visibilitychange", handleVisibilityChange);
       }
       socket.removeAllListeners();
       socket.disconnect();

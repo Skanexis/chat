@@ -156,7 +156,7 @@ export function ChatAppShell({ children }: ChatAppShellProps) {
   const canOpenAdminByPermissions = runtime.hasAnyPermission(adminSurfacePermissions);
   const canOpenDevByPermissions = runtime.isDeveloper && runtime.hasAnyPermission(devSurfacePermissions);
   const showMainNav = canOpenAdminByPermissions || canOpenDevByPermissions;
-  const chatTitle = runtime.chat?.name ?? "Phantom Lab";
+  const chatTitle = runtime.chat?.name ?? "Ristoranti Chat";
   const isLive = runtime.wsStatus === "online" || runtime.wsStatus === "syncing";
   const topbarStatus =
     runtime.typingUsers.length > 0
@@ -201,9 +201,9 @@ export function ChatAppShell({ children }: ChatAppShellProps) {
       <section className="app-shell">
         <ErrorSurface
           code={runtime.error?.statusCode ?? "BOOTSTRAP"}
-          title="Frontend bootstrap failed"
+          title="Connection setup failed"
           message={runtime.error?.message ?? "Unknown error"}
-          actionLabel="Retry bootstrap"
+          actionLabel="Try again"
           onAction={runtime.reload}
         />
       </section>

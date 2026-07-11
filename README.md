@@ -1,4 +1,4 @@
-# Phantom Lab Chat
+# Ristoranti Chat
 
 Backend + frontend kickoff for Telegram Mini App chat.
 

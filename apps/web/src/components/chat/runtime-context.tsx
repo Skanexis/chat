@@ -143,6 +143,7 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
   const socketRef = useRef<ChatSocket | null>(null);
   const typingStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectUiTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const socketRefreshInFlightRef = useRef<Promise<boolean> | null>(null);
   const currentUserIdRef = useRef<string | null>(null);
   const hasConnectedOnceRef = useRef(false);
 
@@ -280,6 +281,43 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
       );
     }
 
+    async function refreshSocketSessionAndReconnect(): Promise<boolean> {
+      if (socketRefreshInFlightRef.current) {
+        return socketRefreshInFlightRef.current;
+      }
+
+      const currentSession = apiRef.current.getSession();
+      if (!currentSession?.refreshToken) {
+        return false;
+      }
+
+      socketRefreshInFlightRef.current = apiRef.current
+        .refreshSession()
+        .then(() => {
+          if (!alive) {
+            return false;
+          }
+          const refreshedSession = apiRef.current.getSession();
+          if (!refreshedSession?.accessToken) {
+            return false;
+          }
+          setSession(refreshedSession);
+          const activeSocket = socketRef.current?.socket;
+          if (activeSocket) {
+            activeSocket.auth = { token: refreshedSession.accessToken };
+            activeSocket.connect();
+          }
+          setError(null);
+          return true;
+        })
+        .catch(() => false)
+        .finally(() => {
+          socketRefreshInFlightRef.current = null;
+        });
+
+      return socketRefreshInFlightRef.current;
+    }
+
     async function bootstrapSession(): Promise<void> {
       try {
         clearReconnectUiTimer();
@@ -377,6 +415,9 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
               setWsStatus("offline");
               setWsReconnectStartedAt(disconnectedAt);
               return;
+            }
+            if (reason === "io server disconnect") {
+              void refreshSocketSessionAndReconnect();
             }
             showReconnectingAfterDelay(disconnectedAt);
           },
@@ -547,6 +588,12 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
             if (isTransientSocketError(message)) {
               setWsConnected(false);
               showReconnectingAfterDelay();
+              return;
+            }
+            if (message.toLowerCase().includes("auth") || message.toLowerCase().includes("token") || message.toLowerCase().includes("jwt")) {
+              setWsConnected(false);
+              showReconnectingAfterDelay();
+              void refreshSocketSessionAndReconnect();
               return;
             }
             clearReconnectUiTimer();

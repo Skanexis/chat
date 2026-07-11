@@ -4,7 +4,7 @@ import Script from "next/script";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Phantom Lab Chat",
+  title: "Ristoranti Chat",
   description: "Modern Telegram Mini App chat"
 };
 
