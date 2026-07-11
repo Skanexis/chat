@@ -142,6 +142,7 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
   const apiRef = useRef(new ApiClient(appConfig.apiBaseUrl));
   const socketRef = useRef<ChatSocket | null>(null);
   const typingStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectUiTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const currentUserIdRef = useRef<string | null>(null);
   const hasConnectedOnceRef = useRef(false);
 
@@ -245,9 +246,43 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
 
   useEffect(() => {
     let alive = true;
+    const reconnectUiDelayMs = 1800;
+
+    function clearReconnectUiTimer(): void {
+      if (reconnectUiTimerRef.current) {
+        clearTimeout(reconnectUiTimerRef.current);
+        reconnectUiTimerRef.current = null;
+      }
+    }
+
+    function showReconnectingAfterDelay(startedAt = new Date().toISOString()): void {
+      clearReconnectUiTimer();
+      reconnectUiTimerRef.current = setTimeout(() => {
+        if (!alive) {
+          return;
+        }
+        setWsStatus("reconnecting");
+        setWsReconnectStartedAt((prev) => prev ?? startedAt);
+        reconnectUiTimerRef.current = null;
+      }, reconnectUiDelayMs);
+    }
+
+    function isTransientSocketError(message: string): boolean {
+      const normalized = message.trim().toLowerCase();
+      return (
+        normalized === "websocket error" ||
+        normalized === "xhr poll error" ||
+        normalized.includes("timeout") ||
+        normalized.includes("transport close") ||
+        normalized.includes("transport error") ||
+        normalized.includes("network error") ||
+        normalized.includes("poll error")
+      );
+    }
 
     async function bootstrapSession(): Promise<void> {
       try {
+        clearReconnectUiTimer();
         initTelegramViewport();
         setState("initializing");
         setError(null);
@@ -321,14 +356,13 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
         socketRef.current?.disconnect();
         socketRef.current = connectChatSocket(appConfig.apiBaseUrl, activeSession.accessToken, chatId, {
           onConnected: () => {
+            clearReconnectUiTimer();
             const wasConnectedBefore = hasConnectedOnceRef.current;
             hasConnectedOnceRef.current = true;
             setWsConnected(true);
             setWsStatus(wasConnectedBefore ? "syncing" : "online");
             setWsReconnectAttempt(null);
-            if (!wasConnectedBefore) {
-              setWsReconnectStartedAt(null);
-            }
+            setWsReconnectStartedAt(null);
             markWsEvent();
             invalidate("invites");
             invalidate("webhooks");
@@ -336,22 +370,28 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
             invalidate("reputation");
           },
           onDisconnected: (reason) => {
+            const disconnectedAt = new Date().toISOString();
             setWsConnected(false);
-            setWsStatus(reason === "io server disconnect" ? "offline" : "reconnecting");
-            if (reason !== "io server disconnect") {
-              setWsReconnectStartedAt((prev) => prev ?? new Date().toISOString());
+            if (reason === "network offline") {
+              clearReconnectUiTimer();
+              setWsStatus("offline");
+              setWsReconnectStartedAt(disconnectedAt);
+              return;
             }
+            showReconnectingAfterDelay(disconnectedAt);
           },
           onReconnecting: (attempt) => {
+            const reconnectingAt = new Date().toISOString();
             setWsConnected(false);
-            setWsStatus("reconnecting");
             setWsReconnectAttempt(attempt);
-            setWsReconnectStartedAt((prev) => prev ?? new Date().toISOString());
+            showReconnectingAfterDelay(reconnectingAt);
           },
           onReconnected: (attempt) => {
+            clearReconnectUiTimer();
             setWsConnected(true);
             setWsStatus("syncing");
             setWsReconnectAttempt(null);
+            setWsReconnectStartedAt(null);
             markWsEvent();
             invalidate("invites");
             invalidate("webhooks");
@@ -362,12 +402,13 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
             }
           },
           onReconnectFailed: () => {
+            clearReconnectUiTimer();
             setWsConnected(false);
-            setWsStatus("offline");
-            setWsReconnectStartedAt(null);
-            setError({ message: "WS reconnect failed. Tap reload to restore live updates." });
+            setWsStatus("reconnecting");
+            setWsReconnectStartedAt((prev) => prev ?? new Date().toISOString());
           },
           onSnapshot: (payload) => {
+            clearReconnectUiTimer();
             void applySnapshot(payload);
             setWsStatus("online");
             setWsReconnectAttempt(null);
@@ -503,13 +544,15 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
             });
           },
           onError: (message) => {
-            setWsConnected(false);
-            setWsStatus("reconnecting");
-            const normalized = message.trim().toLowerCase();
-            // Ignore transient transport errors while auto-reconnect is in progress.
-            if (normalized === "websocket error" || normalized === "xhr poll error") {
+            if (isTransientSocketError(message)) {
+              setWsConnected(false);
+              showReconnectingAfterDelay();
               return;
             }
+            clearReconnectUiTimer();
+            setWsConnected(false);
+            setWsStatus("reconnecting");
+            setWsReconnectStartedAt((prev) => prev ?? new Date().toISOString());
             setError({ message: `WS error: ${message}` });
           }
         });
@@ -528,6 +571,7 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
 
     return () => {
       alive = false;
+      clearReconnectUiTimer();
       socketRef.current?.disconnect();
       socketRef.current = null;
       setWsConnected(false);
@@ -594,8 +638,6 @@ export function ChatRuntimeProvider({ chatId, children }: ChatRuntimeProviderPro
           ? "Moderation mode: only /purge command is available for your role."
           : chat?.member.status === "active" && !canSendText
             ? "Your role has read-only access with reactions only."
-          : !wsConnected
-            ? "Realtime connection is restoring. Sending works, but live updates can be delayed."
             : null;
 
   async function applyBootstrap(bootstrap: BootstrapResponse): Promise<void> {

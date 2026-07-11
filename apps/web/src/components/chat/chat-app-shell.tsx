@@ -1,10 +1,10 @@
 "use client";
 
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-import { Badge, ErrorSurface, RolePill, StateBlock, SystemBanner, cn } from "@/design-system";
+import { Avatar, ErrorSurface, RolePill, StateBlock, SystemBanner, cn } from "@/design-system";
 import { useChatRuntime } from "@/components/chat/runtime-context";
 
 type ChatAppShellProps = {
@@ -22,29 +22,6 @@ function mapStateFromError(code?: number): string {
 function isMaintenanceLockError(message?: string): boolean {
   const text = (message ?? "").toLowerCase();
   return text.includes("maintenance mode");
-}
-
-function wsBadgeLabel(
-  status: ReturnType<typeof useChatRuntime>["wsStatus"],
-  attempt: number | null,
-  reconnectSeconds: number | null
-): string {
-  if (status === "online") {
-    return "WS online";
-  }
-  if (status === "connecting") {
-    return "WS connecting";
-  }
-  if (status === "syncing") {
-    return "WS syncing";
-  }
-  if (status === "reconnecting") {
-    if (reconnectSeconds !== null) {
-      return `WS reconnecting ${reconnectSeconds}s`;
-    }
-    return attempt && attempt > 0 ? `WS reconnect ${attempt}` : "WS reconnecting";
-  }
-  return "WS offline";
 }
 
 function MaintenanceLockScreen({
@@ -91,7 +68,6 @@ function MaintenanceLockScreen({
 export function ChatAppShell({ children }: ChatAppShellProps) {
   const runtime = useChatRuntime();
   const pathname = usePathname();
-  const [reconnectTick, setReconnectTick] = useState(() => Date.now());
 
   const rootPath = `/chat/${encodeURIComponent(runtime.chatId)}`;
   const normalizedPathname = pathname.endsWith("/") && pathname.length > 1 ? pathname.slice(0, -1) : pathname;
@@ -180,40 +156,30 @@ export function ChatAppShell({ children }: ChatAppShellProps) {
   const canOpenAdminByPermissions = runtime.hasAnyPermission(adminSurfacePermissions);
   const canOpenDevByPermissions = runtime.isDeveloper && runtime.hasAnyPermission(devSurfacePermissions);
   const showMainNav = canOpenAdminByPermissions || canOpenDevByPermissions;
+  const chatTitle = runtime.chat?.name ?? "Phantom Lab";
+  const isLive = runtime.wsStatus === "online" || runtime.wsStatus === "syncing";
+  const topbarStatus =
+    runtime.typingUsers.length > 0
+      ? `${runtime.typingUsers.length} typing`
+      : runtime.wsStatus === "online"
+        ? "Online"
+        : runtime.wsStatus === "syncing"
+          ? "Updating"
+          : runtime.wsStatus === "connecting"
+            ? "Connecting"
+          : runtime.wsStatus === "reconnecting"
+            ? "Reconnecting"
+            : "Offline";
   const mainNavItems = showMainNav
     ? [
-        { label: "Chat", href: rootPath },
-        { label: canOpenDevByPermissions ? "DEV" : "Admin", href: `${rootPath}/admin` }
+        { label: "Chats", href: rootPath, icon: "chat" },
+        { label: canOpenDevByPermissions ? "Studio" : "Tools", href: `${rootPath}/admin`, icon: "settings" }
       ]
     : [];
   const workspaceNavItems: Array<{ label: string; href: string }> = [];
   const adminNavItems: Array<{ label: string; href: string }> = [];
 
   const showFooterNav = mainNavItems.length > 0 || workspaceNavItems.length > 0 || adminNavItems.length > 0;
-
-  useEffect(() => {
-    if (runtime.wsStatus !== "reconnecting" || !runtime.wsReconnectStartedAt) {
-      return;
-    }
-    setReconnectTick(Date.now());
-    const timer = window.setInterval(() => {
-      setReconnectTick(Date.now());
-    }, 1000);
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [runtime.wsStatus, runtime.wsReconnectStartedAt]);
-
-  const reconnectSeconds = useMemo(() => {
-    if (!runtime.wsReconnectStartedAt || runtime.wsStatus !== "reconnecting") {
-      return null;
-    }
-    const startedAtMs = Date.parse(runtime.wsReconnectStartedAt);
-    if (!Number.isFinite(startedAtMs)) {
-      return null;
-    }
-    return Math.max(1, Math.floor((reconnectTick - startedAtMs) / 1000));
-  }, [runtime.wsReconnectStartedAt, runtime.wsStatus, reconnectTick]);
 
   if (runtime.state === "initializing") {
     return (
@@ -283,16 +249,15 @@ export function ChatAppShell({ children }: ChatAppShellProps) {
   return (
     <section className="app-shell">
       <header className="app-topbar">
-        <div>
-          <h1>Ristoranti Chat</h1>
+        <div className="app-chat-titlebar">
+          <Avatar name={chatTitle} size="md" online={isLive} className="app-chat-avatar" />
+          <div className="app-title-copy">
+            <h1>{chatTitle}</h1>
+            <p>{topbarStatus}</p>
+          </div>
         </div>
         <div className="app-meta">
           <RolePill role={runtime.roleName} />
-          <Badge
-            variant={runtime.wsStatus === "online" ? "success" : runtime.wsStatus === "offline" ? "danger" : "warning"}
-          >
-            {wsBadgeLabel(runtime.wsStatus, runtime.wsReconnectAttempt, reconnectSeconds)}
-          </Badge>
         </div>
       </header>
 
@@ -323,7 +288,13 @@ export function ChatAppShell({ children }: ChatAppShellProps) {
               {mainNavItems.map((item) => {
                 const active = normalizedPathname === item.href;
                 return (
-                  <Link key={item.href} className={cn("ds-tab-btn", active ? "is-active" : undefined)} href={item.href}>
+                  <Link
+                    key={item.href}
+                    className={cn("ds-tab-btn", active ? "is-active" : undefined)}
+                    href={item.href}
+                    data-tab-icon={item.icon}
+                  >
+                    <span className="ds-tab-icon" aria-hidden="true" />
                     <span>{item.label}</span>
                   </Link>
                 );

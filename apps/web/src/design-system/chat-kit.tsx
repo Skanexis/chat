@@ -1,6 +1,6 @@
 import { type ChangeEvent, type FormEvent, type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from "react";
 
-import { Avatar, Badge, Button, cn } from "@/design-system/primitives";
+import { Avatar, Badge, cn } from "@/design-system/primitives";
 
 export type MessageReaction = {
   reaction: string;
@@ -578,21 +578,34 @@ export function Composer({
           </button>
         ))}
       </div>
-      <label className="ds-composer-field">
-        <textarea
-          ref={textareaRef}
-          value={draft}
-          onChange={handleChange}
-          onKeyDown={handleKeyDown}
-          rows={2}
-          maxLength={4000}
-          placeholder="Write a message..."
-          disabled={disabled || sending}
-        />
-      </label>
-      <Button type="submit" loading={sending} disabled={disabled || draft.trim().length === 0}>
-        Send
-      </Button>
+      <div className="ds-composer-glass">
+        <button type="button" className="ds-composer-icon ds-composer-icon-emoji" aria-label="Emoji" disabled />
+        <label className="ds-composer-field">
+          <textarea
+            ref={textareaRef}
+            value={draft}
+            onChange={handleChange}
+            onKeyDown={handleKeyDown}
+            rows={2}
+            maxLength={4000}
+            placeholder="Message"
+            disabled={disabled || sending}
+          />
+        </label>
+        <div className="ds-composer-side-actions">
+          <button type="button" className="ds-composer-icon ds-composer-icon-attach" aria-label="Attachment" disabled />
+          <button type="button" className="ds-composer-icon ds-composer-icon-camera" aria-label="Camera" disabled />
+          <button type="button" className="ds-composer-icon ds-composer-icon-voice" aria-label="Voice" disabled />
+          <button
+            type="submit"
+            className="ds-send-button"
+            disabled={disabled || sending || draft.trim().length === 0}
+            aria-label="Send message"
+          >
+            {sending ? <span className="ds-spinner" aria-hidden="true" /> : <span className="ds-send-glyph" aria-hidden="true" />}
+          </button>
+        </div>
+      </div>
     </form>
   );
 }

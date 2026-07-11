@@ -537,7 +537,7 @@ export function ChatMainSection() {
 
   return (
     <section className="chat-main" ref={chatMainRef}>
-      <PinnedBanner message="Welcome to Ristoranti Chat. Follow the rules and use role-aware sender mode when needed." />
+      <PinnedBanner message={`${runtime.chat?.name ?? "Phantom Lab"} is online. Keep the conversation clear and timely.`} />
       <div
         className="chat-feed"
         ref={feedRef}
