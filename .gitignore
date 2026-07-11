@@ -7,3 +7,4 @@ dist/
 *.tsbuildinfo
 deploy/env/*.env
 !deploy/env/*.env.example
+*.mov

@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -22,6 +22,41 @@ function mapStateFromError(code?: number): string {
 function isMaintenanceLockError(message?: string): boolean {
   const text = (message ?? "").toLowerCase();
   return text.includes("maintenance mode");
+}
+
+const SPLASH_VIDEO_SRC = "/risto-logo.mp4";
+const SPLASH_POSTER_SRC = "/risto-logo-poster.jpg";
+// Video runs ~6.5s; the cap releases the app if playback stalls or autoplay is blocked.
+const SPLASH_MAX_MS = 8000;
+const SPLASH_FADE_MS = 480;
+
+type SplashPhase = "playing" | "leaving" | "hidden";
+
+function SplashScreen({
+  leaving,
+  onEnded,
+  onError
+}: {
+  leaving: boolean;
+  onEnded: () => void;
+  onError: () => void;
+}) {
+  return (
+    <div className={cn("app-splash", leaving ? "is-leaving" : undefined)} aria-hidden="true">
+      <video
+        className="app-splash-video"
+        src={SPLASH_VIDEO_SRC}
+        poster={SPLASH_POSTER_SRC}
+        autoPlay
+        muted
+        playsInline
+        preload="auto"
+        disablePictureInPicture
+        onEnded={onEnded}
+        onError={onError}
+      />
+    </div>
+  );
 }
 
 function MaintenanceLockScreen({
@@ -68,6 +103,19 @@ function MaintenanceLockScreen({
 export function ChatAppShell({ children }: ChatAppShellProps) {
   const runtime = useChatRuntime();
   const pathname = usePathname();
+  const [splashPhase, setSplashPhase] = useState<SplashPhase>("playing");
+
+  useEffect(() => {
+    if (splashPhase !== "playing") return;
+    const cap = window.setTimeout(() => setSplashPhase("leaving"), SPLASH_MAX_MS);
+    return () => window.clearTimeout(cap);
+  }, [splashPhase]);
+
+  useEffect(() => {
+    if (splashPhase !== "leaving") return;
+    const fade = window.setTimeout(() => setSplashPhase("hidden"), SPLASH_FADE_MS);
+    return () => window.clearTimeout(fade);
+  }, [splashPhase]);
 
   const rootPath = `/chat/${encodeURIComponent(runtime.chatId)}`;
   const normalizedPathname = pathname.endsWith("/") && pathname.length > 1 ? pathname.slice(0, -1) : pathname;
@@ -181,14 +229,25 @@ export function ChatAppShell({ children }: ChatAppShellProps) {
 
   const showFooterNav = mainNavItems.length > 0 || workspaceNavItems.length > 0 || adminNavItems.length > 0;
 
+  const splashElement =
+    splashPhase !== "hidden" ? (
+      <SplashScreen
+        leaving={splashPhase === "leaving"}
+        onEnded={() => setSplashPhase("leaving")}
+        onError={() => setSplashPhase("hidden")}
+      />
+    ) : null;
+
   if (runtime.state === "initializing") {
     return (
       <section className="app-shell">
-        <StateBlock
-          state="loading"
-          title="Initializing Mini App session"
-          description="Authenticating Telegram user and loading chat bootstrap payload."
-        />
+        {splashElement ?? (
+          <StateBlock
+            state="loading"
+            title="Initializing Mini App session"
+            description="Authenticating Telegram user and loading chat bootstrap payload."
+          />
+        )}
       </section>
     );
   }
@@ -248,6 +307,7 @@ export function ChatAppShell({ children }: ChatAppShellProps) {
 
   return (
     <section className="app-shell">
+      {splashElement}
       <header className="app-topbar">
         <div className="app-chat-titlebar">
           <Avatar name={chatTitle} size="md" online={isLive} className="app-chat-avatar" />

@@ -2759,6 +2759,18 @@ export class PrismaDatabaseService implements DatabaseService {
         create: { roleId: MAIN_READONLY_ROLE_ID, chatId: MAIN_CHAT_ID },
         update: { chatId: MAIN_CHAT_ID }
       });
+
+      // Databases seeded before the product rename still hold the old default
+      // names; only rows matching the old defaults are renamed so custom names
+      // set by admins are preserved.
+      await tx.chat.updateMany({
+        where: { id: MAIN_CHAT_ID, name: "Phantom Lab Main Chat" },
+        data: { name: "Ristoranti Chat" }
+      });
+      await tx.chatIdentity.updateMany({
+        where: { id: MAIN_IDENTITY_ID, name: "Phantom Lab Team" },
+        data: { name: "Ristoranti Chat Team" }
+      });
     });
   }
 

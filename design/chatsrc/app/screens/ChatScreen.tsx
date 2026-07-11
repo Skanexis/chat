@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { MessageSquare } from "lucide-react";
 import { MESSAGES, USERS } from "../mock";
-import { Composer, MessageBubble, PinnedBanner, TypingIndicator } from "../components/kits/ChatKit";
+import { Composer, MessageBubble, TypingIndicator } from "../components/kits/ChatKit";
 
 export function ChatScreen() {
   const [messages, setMessages] = useState(MESSAGES);
@@ -16,7 +16,7 @@ export function ChatScreen() {
             </div>
           </div>
           <div className="flex flex-col gap-0.5">
-            <h1 className="text-lg font-black text-white tracking-tight leading-none">Phantom Lab</h1>
+            <h1 className="text-lg font-black text-white tracking-tight leading-none">Ristoranti Chat</h1>
             <span className="text-[11px] font-bold text-violet-400 uppercase tracking-widest flex items-center gap-1.5">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)] animate-pulse" /> 
               1,248 Online
@@ -24,8 +24,6 @@ export function ChatScreen() {
           </div>
         </div>
       </header>
-
-      <PinnedBanner message="Welcome to Phantom Lab. Please read the community guidelines before posting." />
 
       <div className="flex-1 overflow-y-auto px-4 py-6 flex flex-col gap-4 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] bg-fixed bg-opacity-5 scrollbar-none">
         {messages.map((msg, i) => (
