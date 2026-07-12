@@ -480,6 +480,83 @@ type SenderOption = {
   disabled?: boolean;
 };
 
+// Curated set limited to Unicode 12.0 (2019) and older so every emoji renders
+// on older iOS/Android clients too.
+const EMOJI_GROUPS: Array<{ label: string; emojis: string[] }> = [
+  {
+    label: "Smileys",
+    emojis: [
+      "😀", "😁", "😂", "🤣", "😊", "😇", "🙂", "🙃",
+      "😉", "😍", "🥰", "😘", "😋", "😜", "🤪", "😝",
+      "🤑", "🤗", "🤭", "🤫", "🤔", "😐", "😶", "🙄",
+      "😏", "😴", "🥱", "😪", "😷", "🤒", "🤢", "🤮",
+      "🥵", "🥶", "😵", "🤯", "🤠", "🥳", "😎", "🤓",
+      "🥺", "😢", "😭", "😱", "😤", "😡", "🤬", "😈"
+    ]
+  },
+  {
+    label: "Creatures",
+    emojis: [
+      "💀", "👻", "👽", "🤖", "👾", "🤡", "👹", "👺",
+      "🎃", "😺", "😹", "😻", "🙈", "🙉", "🙊", "🦄",
+      "🐙", "🦑", "🦀", "🦞", "🐳", "🦈", "🐸", "🐼",
+      "🦊", "🐯", "🦁", "🐵", "🦜", "🦩", "🦚", "🦥"
+    ]
+  },
+  {
+    label: "Gestures",
+    emojis: [
+      "👍", "👎", "👌", "🤏", "✌️", "🤞", "🤟", "🤘",
+      "🤙", "👈", "👉", "👆", "👇", "☝️", "✋", "🖖",
+      "👋", "🤝", "👏", "🙌", "👐", "🙏", "💪", "🤳"
+    ]
+  },
+  {
+    label: "Hearts",
+    emojis: [
+      "❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "🤍",
+      "💔", "❣️", "💕", "💞", "💓", "💗", "💖", "💘"
+    ]
+  },
+  {
+    label: "Food & Drink",
+    emojis: [
+      "🍕", "🍝", "🍔", "🍟", "🌭", "🌮", "🌯", "🥙",
+      "🥪", "🍣", "🍱", "🍜", "🍲", "🥘", "🥗", "🍳",
+      "🥩", "🥓", "🍗", "🧀", "🥖", "🥐", "🥨", "🧇",
+      "🥞", "🍅", "🥑", "🥦", "🌽", "🌶️", "🍄", "🧄",
+      "🍋", "🍊", "🍎", "🍓", "🍇", "🍉", "🍒", "🥭",
+      "🍍", "🥥", "🍰", "🎂", "🧁", "🥧", "🍮", "🍦",
+      "🍩", "🍪", "🍫", "🍿", "☕", "🍵", "🥤", "🍷",
+      "🍸", "🍹", "🍺", "🍻", "🥂", "🥃", "🍾", "🍶"
+    ]
+  },
+  {
+    label: "Nature",
+    emojis: [
+      "🌸", "🌹", "🌻", "🌴", "🌵", "🍀", "🍁", "🌙",
+      "🌚", "🌝", "☀️", "🌈", "⭐", "✨", "☄️", "🔥",
+      "💧", "🌊", "⚡", "❄️", "☃️", "🌪️", "🌍", "🪐"
+    ]
+  },
+  {
+    label: "Fun & Objects",
+    emojis: [
+      "🎉", "🎊", "🎈", "🎁", "🏆", "🥇", "🎯", "🎲",
+      "🎮", "🕹️", "🎭", "🎨", "🎤", "🎧", "🎸", "🥁",
+      "🎬", "📸", "🔮", "🧿", "🛸", "🚀", "🧨", "💣",
+      "💎", "🔔", "💡", "🔑", "⏰", "📌", "📞", "🧸"
+    ]
+  },
+  {
+    label: "Symbols",
+    emojis: [
+      "💯", "✅", "❌", "⚠️", "❗", "❓", "💤", "💬",
+      "♻️", "🔝", "🆗", "🔒", "🔓", "➕", "➖", "🚫"
+    ]
+  }
+];
+
 type ComposerProps = {
   draft: string;
   sending: boolean;
@@ -511,6 +588,62 @@ export function Composer({
   onTyping
 }: ComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const emojiButtonRef = useRef<HTMLButtonElement | null>(null);
+  const emojiPanelRef = useRef<HTMLDivElement | null>(null);
+  const [emojiOpen, setEmojiOpen] = useState(false);
+
+  useEffect(() => {
+    if (!emojiOpen) {
+      return;
+    }
+
+    function handlePointerDown(event: PointerEvent): void {
+      const target = event.target instanceof Node ? event.target : null;
+      if (target && (emojiPanelRef.current?.contains(target) || emojiButtonRef.current?.contains(target))) {
+        return;
+      }
+      setEmojiOpen(false);
+    }
+
+    function handleEscape(event: globalThis.KeyboardEvent): void {
+      if (event.key === "Escape") {
+        setEmojiOpen(false);
+      }
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [emojiOpen]);
+
+  useEffect(() => {
+    if (disabled) {
+      setEmojiOpen(false);
+    }
+  }, [disabled]);
+
+  function insertEmoji(emoji: string): void {
+    const textarea = textareaRef.current;
+    const start = textarea?.selectionStart ?? draft.length;
+    const end = textarea?.selectionEnd ?? draft.length;
+    const next = draft.slice(0, start) + emoji + draft.slice(end);
+    if (next.length > 4000) {
+      return;
+    }
+    onChange(next);
+    onTyping();
+    requestAnimationFrame(() => {
+      if (!textarea) {
+        return;
+      }
+      textarea.focus();
+      const caret = start + emoji.length;
+      textarea.setSelectionRange(caret, caret);
+    });
+  }
 
   function resizeTextarea(): void {
     const textarea = textareaRef.current;
@@ -578,8 +711,38 @@ export function Composer({
           </button>
         ))}
       </div>
+      {emojiOpen ? (
+        <div className="ds-emoji-panel" ref={emojiPanelRef} role="dialog" aria-label="Emoji picker">
+          {EMOJI_GROUPS.map((group) => (
+            <div key={group.label} className="ds-emoji-group">
+              <span className="ds-emoji-group-label">{group.label}</span>
+              <div className="ds-emoji-grid">
+                {group.emojis.map((emoji) => (
+                  <button
+                    key={emoji}
+                    type="button"
+                    className="ds-emoji-option"
+                    onClick={() => insertEmoji(emoji)}
+                    aria-label={`Insert ${emoji}`}
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
       <div className="ds-composer-glass">
-        <button type="button" className="ds-composer-icon ds-composer-icon-emoji" aria-label="Emoji" disabled />
+        <button
+          ref={emojiButtonRef}
+          type="button"
+          className={cn("ds-composer-icon ds-composer-icon-emoji", emojiOpen ? "is-active" : undefined)}
+          aria-label="Emoji"
+          aria-expanded={emojiOpen}
+          disabled={disabled || sending}
+          onClick={() => setEmojiOpen((open) => !open)}
+        />
         <label className="ds-composer-field">
           <textarea
             ref={textareaRef}
@@ -595,7 +758,6 @@ export function Composer({
         <div className="ds-composer-side-actions">
           <button type="button" className="ds-composer-icon ds-composer-icon-attach" aria-label="Attachment" disabled />
           <button type="button" className="ds-composer-icon ds-composer-icon-camera" aria-label="Camera" disabled />
-          <button type="button" className="ds-composer-icon ds-composer-icon-voice" aria-label="Voice" disabled />
           <button
             type="submit"
             className="ds-send-button"
